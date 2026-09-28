@@ -1,0 +1,20 @@
+# IP
+10.245.131.96
+
+## setup ip
+source /opt/ros/jazzy/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_DOMAIN_ID=8
+
+##  check the /ip topic
+ros2 topic echo /ip
+
+
+## check cmd
+ros2 topic echo /cmd_vel
+
+## Turtlebot4
+turtlebot4-setup
+
+## Restart ROS daemon
+ros2 daemon stop; ros2 daemon start
