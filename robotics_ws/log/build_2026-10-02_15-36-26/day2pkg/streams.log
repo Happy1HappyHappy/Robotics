@@ -1,0 +1,34 @@
+[0.643s] Invoking command in '/home/robo/Robotics/robotics_ws/src/day2pkg': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/robo/Robotics/robotics_ws/build/day2pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/robo/Robotics/robotics_ws/install/day2pkg/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/day2pkg build --build-base /home/robo/Robotics/robotics_ws/build/day2pkg/build install --record /home/robo/Robotics/robotics_ws/build/day2pkg/install.log --install-scripts $base/lib/day2pkg --single-version-externally-managed install_data
+[0.829s] running egg_info
+[0.829s] creating ../../build/day2pkg/day2pkg.egg-info
+[0.842s] writing ../../build/day2pkg/day2pkg.egg-info/PKG-INFO
+[0.842s] writing dependency_links to ../../build/day2pkg/day2pkg.egg-info/dependency_links.txt
+[0.843s] writing requirements to ../../build/day2pkg/day2pkg.egg-info/requires.txt
+[0.843s] writing top-level names to ../../build/day2pkg/day2pkg.egg-info/top_level.txt
+[0.843s] writing manifest file '../../build/day2pkg/day2pkg.egg-info/SOURCES.txt'
+[0.868s] reading manifest file '../../build/day2pkg/day2pkg.egg-info/SOURCES.txt'
+[0.869s] writing manifest file '../../build/day2pkg/day2pkg.egg-info/SOURCES.txt'
+[0.869s] running build
+[0.869s] running build_py
+[0.869s] creating /home/robo/Robotics/robotics_ws/build/day2pkg/build
+[0.869s] creating /home/robo/Robotics/robotics_ws/build/day2pkg/build/lib
+[0.869s] creating /home/robo/Robotics/robotics_ws/build/day2pkg/build/lib/day2pkg
+[0.869s] copying day2pkg/__init__.py -> /home/robo/Robotics/robotics_ws/build/day2pkg/build/lib/day2pkg
+[0.869s] running install
+[0.874s] running install_lib
+[0.887s] creating /home/robo/Robotics/robotics_ws/install/day2pkg/lib/python3.12/site-packages/day2pkg
+[0.887s] copying /home/robo/Robotics/robotics_ws/build/day2pkg/build/lib/day2pkg/__init__.py -> /home/robo/Robotics/robotics_ws/install/day2pkg/lib/python3.12/site-packages/day2pkg
+[0.887s] byte-compiling /home/robo/Robotics/robotics_ws/install/day2pkg/lib/python3.12/site-packages/day2pkg/__init__.py to __init__.cpython-312.pyc
+[0.887s] running install_data
+[0.887s] creating /home/robo/Robotics/robotics_ws/install/day2pkg/share
+[0.887s] creating /home/robo/Robotics/robotics_ws/install/day2pkg/share/ament_index
+[0.887s] creating /home/robo/Robotics/robotics_ws/install/day2pkg/share/ament_index/resource_index
+[0.887s] creating /home/robo/Robotics/robotics_ws/install/day2pkg/share/ament_index/resource_index/packages
+[0.887s] copying resource/day2pkg -> /home/robo/Robotics/robotics_ws/install/day2pkg/share/ament_index/resource_index/packages
+[0.888s] creating /home/robo/Robotics/robotics_ws/install/day2pkg/share/day2pkg
+[0.888s] copying package.xml -> /home/robo/Robotics/robotics_ws/install/day2pkg/share/day2pkg
+[0.888s] running install_egg_info
+[0.902s] Copying ../../build/day2pkg/day2pkg.egg-info to /home/robo/Robotics/robotics_ws/install/day2pkg/lib/python3.12/site-packages/day2pkg-0.0.0-py3.12.egg-info
+[0.902s] running install_scripts
+[0.991s] writing list of installed files to '/home/robo/Robotics/robotics_ws/build/day2pkg/install.log'
+[1.012s] Invoked command in '/home/robo/Robotics/robotics_ws/src/day2pkg' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/robo/Robotics/robotics_ws/build/day2pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/robo/Robotics/robotics_ws/install/day2pkg/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/day2pkg build --build-base /home/robo/Robotics/robotics_ws/build/day2pkg/build install --record /home/robo/Robotics/robotics_ws/build/day2pkg/install.log --install-scripts $base/lib/day2pkg --single-version-externally-managed install_data

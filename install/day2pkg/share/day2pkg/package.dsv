@@ -1,0 +1,3 @@
+source;share/day2pkg/hook/pythonpath.ps1
+source;share/day2pkg/hook/pythonpath.dsv
+source;share/day2pkg/hook/pythonpath.sh
