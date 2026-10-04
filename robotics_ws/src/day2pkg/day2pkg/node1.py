@@ -1,3 +1,8 @@
+"""
+This module defines Node1, a ROS2 node for controlling a robot's velocity
+using TwistStamped messages
+"""
+
 import math
 import time
 
@@ -182,7 +187,7 @@ class Node1(Node):
             return
 
         if not self.segments:
-            self.stop()
+            self.stop()     # stop the robot if there are no more segments
             return
 
         msg, duration, label = self.segments[0]
