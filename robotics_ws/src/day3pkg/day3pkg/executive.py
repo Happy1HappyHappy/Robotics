@@ -5,7 +5,7 @@ from action_msgs.msg import GoalStatus
 
 from day3_interfaces.action import Drive
 
-HELP = 'Commands:  m <meters>   t <degrees>   q (quit)'
+HELP = 'Commands:  m <meters>   t <degrees>   p (letter P)   8 (figure-8)   q (quit)'
 
 
 class ExecutiveNode(Node):
@@ -44,8 +44,10 @@ class ExecutiveNode(Node):
         else:
             print(f'Action ended with status {status}.')
         return False
-    
-    SHAPES = {
+
+
+# Extra Credit A: each shape is a list of single-step commands
+SHAPES = {
     # squared "P": stem up, then the bowl on the right
     'p': [('m', 1.0), ('t', 270), ('m', 0.4), ('t', 270),
           ('m', 0.5), ('t', 270), ('m', 0.4)],
@@ -55,12 +57,14 @@ class ExecutiveNode(Node):
           ('m', 0.5)],
 }
 
-    def run_shape(node, name):
-        for kind, value in SHAPES[name]:
-            ok = node.send(value, 0.0) if kind == 'm' else node.send(0.0, value)
-            if not ok:
-                print('Shape aborted.')
-                return
+
+def run_shape(node, name):
+    for kind, value in SHAPES[name]:
+        ok = node.send(value, 0.0) if kind == 'm' else node.send(0.0, value)
+        if not ok:
+            print('Shape aborted.')
+            return
+    print(f'Shape {name} done.')
 
 
 def main(args=None):
@@ -75,10 +79,12 @@ def main(args=None):
             cmd = parts[0].lower()
             if cmd == 'q':
                 break
+            if cmd in SHAPES and len(parts) == 1:
+                run_shape(node, cmd)
+                continue
             if cmd not in ('m', 't') or len(parts) != 2:
                 print(HELP)
                 continue
-            if cmd in SHAPES: run_shape(node, cmd); continue
             try:
                 value = float(parts[1])
             except ValueError:
