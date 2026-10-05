@@ -1,0 +1,7 @@
+# Goal (request): exactly one of these should be non-zero
+float64 distance   # meters, must be >= 0
+float64 angle      # degrees, counter-clockwise, must be >= 0
+---
+# Result: empty for now (later: final pose)
+---
+# Feedback: empty for now (later: sensor-based progress)
