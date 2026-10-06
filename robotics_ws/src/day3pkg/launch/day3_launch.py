@@ -1,9 +1,17 @@
+"""
+Launch file for the day3pkg package
+"""
+
 from launch import LaunchDescription
 from launch.actions import Shutdown
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """
+    Generate launch description for the day3pkg package
+    'ros2 launch' calls this function to get the launch description
+    """
     ld = LaunchDescription()
 
     driver = Node(
@@ -25,6 +33,7 @@ def generate_launch_description():
         on_exit=Shutdown(),     # when the Executive quits, stop the whole launch (incl. driver)
     )
 
+    # add_action adds a node to the launch process
     ld.add_action(driver)
     ld.add_action(executive)
     return ld
