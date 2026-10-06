@@ -1,3 +1,7 @@
+"""
+Executive node for controlling the robot via high-level commands
+Provides a command-line interface to send driving goals to the Driving Node
+"""
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
@@ -9,11 +13,20 @@ HELP = 'Commands:  m <meters>   t <degrees>   p (letter P)   8 (figure-8)   q (q
 
 
 class ExecutiveNode(Node):
+    """
+    Node responsible for sending high-level driving commands to Driving Node
+    """
     def __init__(self):
         super().__init__('executive_node')
         self.client_ = ActionClient(self, Drive, 'drive')
 
     def send(self, distance: float, angle: float) -> bool:
+        """
+        Send a driving goal to the Driving Node
+        distance: linear distance in meters
+        angle: rotation angle in degrees
+        Returns True if the goal was accepted and succeeded, False otherwise
+        """
         if not self.client_.wait_for_server(timeout_sec=5.0):
             print('Driving Node is not available.')
             return False
@@ -22,7 +35,7 @@ class ExecutiveNode(Node):
         goal.distance = float(distance)   # float64 fields reject Python ints
         goal.angle = float(angle)
 
-        # 1) send goal, wait for accept/reject
+        # send goal, wait for accept/reject
         send_future = self.client_.send_goal_async(goal)
         rclpy.spin_until_future_complete(self, send_future)
         goal_handle = send_future.result()
@@ -31,7 +44,7 @@ class ExecutiveNode(Node):
             return False
         print('Request accepted, moving...')
 
-        # 2) wait for the result
+        # wait for the result
         result_future = goal_handle.get_result_async()
         rclpy.spin_until_future_complete(self, result_future)
         status = result_future.result().status
@@ -59,6 +72,12 @@ SHAPES = {
 
 
 def run_shape(node, name):
+    """
+    Execute a predefined shape by sending a sequence of driving commands
+    to the Executive Node
+    node: instance of ExecutiveNode
+    name: name of the shape to run (must be a key in SHAPES)
+    """
     for kind, value in SHAPES[name]:
         ok = node.send(value, 0.0) if kind == 'm' else node.send(0.0, value)
         if not ok:
@@ -68,6 +87,11 @@ def run_shape(node, name):
 
 
 def main(args=None):
+    """
+    Entry point for the Executive Node command-line interface
+    Initializes the ROS 2 system, creates the node, and processes user commands
+    Cleans up resources on shutdown
+    """
     rclpy.init(args=args)
     node = ExecutiveNode()
     print(HELP)
