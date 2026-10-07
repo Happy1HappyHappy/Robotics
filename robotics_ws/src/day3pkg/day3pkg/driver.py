@@ -26,8 +26,7 @@ class DrivingNode(Node):
         # tune speeds without rebuilding
         self.declare_parameter('linear_speed', 0.15)   # m/s
         self.declare_parameter('angular_speed', 0.5)   # rad/s
-        self.declare_parameter('max_angular_speed', 2.84)  # rad/s, adjust for your robot
-        #   so tight arcs can cap w (Burger ~2.84 rad/s, Waffle ~1.82 rad/s)
+        self.declare_parameter('max_angular_speed', 1.82)  # rad/s, Waffle limit (Burger 2.84)
         self.declare_parameter('rate_hz', 10.0)
 
         self.cmd_pub_ = self.create_publisher(TwistStamped, 'cmd_vel', 10)
