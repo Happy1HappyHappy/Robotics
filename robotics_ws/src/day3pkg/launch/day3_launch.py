@@ -22,6 +22,7 @@ def generate_launch_description():
         parameters=[
             {'linear_speed': 0.15},
             {'angular_speed': 0.5},
+            {'max_angular_speed': 1.0},
         ],
     )
 

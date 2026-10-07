@@ -9,7 +9,8 @@ from action_msgs.msg import GoalStatus
 
 from day3_interfaces.action import Drive
 
-HELP = 'Commands:  m <meters>   t <degrees>   p (letter P)   8 (figure-8)   q (quit)'
+HELP = ('Commands:  m <meters>   t <degrees>   a <l|r> <radius m> <degrees> (arc)\n'
+        '           p / rp (letter P)   8 / r8 (figure-8)   q (quit)')
 
 
 class ExecutiveNode(Node):
@@ -20,11 +21,14 @@ class ExecutiveNode(Node):
         super().__init__('executive_node')
         self.client_ = ActionClient(self, Drive, 'drive')
 
-    def send(self, distance: float, angle: float) -> bool:
+    def send(self, distance: float, angle: float,
+             radius: float = 0.0, turn_right: bool = False) -> bool:
         """
         Send a driving goal to the Driving Node
         distance: linear distance in meters
-        angle: rotation angle in degrees
+        angle: rotation angle in degrees (for an arc: degrees along the arc)
+        radius: arc radius in meters (0 = not an arc)
+        turn_right: arc direction, False = left, True = right
         Returns True if the goal was accepted and succeeded, False otherwise
         """
         if not self.client_.wait_for_server(timeout_sec=5.0):
@@ -34,6 +38,8 @@ class ExecutiveNode(Node):
         goal = Drive.Goal()
         goal.distance = float(distance)   # float64 fields reject Python ints
         goal.angle = float(angle)
+        goal.radius = float(radius)
+        goal.turn_right = bool(turn_right)
 
         # send goal, wait for accept/reject
         send_future = self.client_.send_goal_async(goal)
@@ -60,6 +66,7 @@ class ExecutiveNode(Node):
 
 
 # Extra Credit A: each shape is a list of single-step commands
+# ('m', meters), ('t', degrees), ('a', 'l' or 'r', radius, degrees)
 SHAPES = {
     # squared "P": stem up, then the bowl on the right
     'p': [('m', 1.0), ('t', 270), ('m', 0.4), ('t', 270),
@@ -68,6 +75,10 @@ SHAPES = {
     '8': [('m', 0.5), ('t', 90), ('m', 0.5), ('t', 90), ('m', 0.5), ('t', 90),
           ('m', 1.0), ('t', 270), ('m', 0.5), ('t', 270), ('m', 0.5), ('t', 270),
           ('m', 0.5)],
+    # rounded "P": stem up, then a half-circle bowl on the right
+    'rp': [('m', 1.0), ('a', 'r', 0.25, 180)],
+    # rounded figure-8: full circle left, then full circle right
+    'r8': [('a', 'l', 0.25, 360), ('a', 'r', 0.25, 360)],
 }
 
 
@@ -78,8 +89,14 @@ def run_shape(node, name):
     node: instance of ExecutiveNode
     name: name of the shape to run (must be a key in SHAPES)
     """
-    for kind, value in SHAPES[name]:
-        ok = node.send(value, 0.0) if kind == 'm' else node.send(0.0, value)
+    for kind, *args in SHAPES[name]:
+        if kind == 'm':
+            ok = node.send(args[0], 0.0)
+        elif kind == 't':
+            ok = node.send(0.0, args[0])
+        else:
+            side, radius, degrees = args
+            ok = node.send(0.0, degrees, radius, side == 'r')
         if not ok:
             print('Shape aborted.')
             return
@@ -105,6 +122,20 @@ def main(args=None):
                 break
             if cmd in SHAPES and len(parts) == 1:
                 run_shape(node, cmd)
+                continue
+            if cmd == 'a':
+                if len(parts) != 4 or parts[1].lower() not in ('l', 'r'):
+                    print(HELP)
+                    continue
+                try:
+                    radius, degrees = float(parts[2]), float(parts[3])
+                except ValueError:
+                    print('Radius and degrees must be numbers.')
+                    continue
+                if radius <= 0.0 or not 0.0 <= degrees <= 360.0:
+                    print('Radius must be > 0 and degrees must be 0 to 360.')
+                    continue
+                node.send(0.0, degrees, radius, parts[1].lower() == 'r')
                 continue
             if cmd not in ('m', 't') or len(parts) != 2:
                 print(HELP)

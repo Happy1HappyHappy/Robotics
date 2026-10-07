@@ -26,6 +26,8 @@ class DrivingNode(Node):
         # tune speeds without rebuilding
         self.declare_parameter('linear_speed', 0.15)   # m/s
         self.declare_parameter('angular_speed', 0.5)   # rad/s
+        self.declare_parameter('max_angular_speed', 2.84)  # rad/s, adjust for your robot
+        #   so tight arcs can cap w (Burger ~2.84 rad/s, Waffle ~1.82 rad/s)
         self.declare_parameter('rate_hz', 10.0)
 
         self.cmd_pub_ = self.create_publisher(TwistStamped, 'cmd_vel', 10)
@@ -42,13 +44,23 @@ class DrivingNode(Node):
     # ---------- accept / reject ----------
     def goal_callback(self, goal: Drive.Goal):
         """
-        Accept or reject a driving goal based on distance and angle
-        Reject if either is negative or if both are non-zero
+        Accept or reject a driving goal based on distance, angle and radius
+        Reject if any is negative, if both distance and angle are non-zero,
+        or if an arc has a distance or an angle outside [0, 360]
         """
-        d, a = goal.distance, goal.angle
-        if d < 0.0 or a < 0.0:
-            self.get_logger().warn(f'Reject: negative value (distance={d}, angle={a})')
+        d, a, r = goal.distance, goal.angle, goal.radius
+        if d < 0.0 or a < 0.0 or r < 0.0:
+            self.get_logger().warn(
+                f'Reject: negative value (distance={d}, angle={a}, radius={r})')
             return GoalResponse.REJECT
+        if r > 0.0:
+            if d != 0.0 or a > 360.0:
+                self.get_logger().warn(
+                    f'Reject: bad arc (distance={d}, angle={a}, radius={r})')
+                return GoalResponse.REJECT
+            side = 'right' if goal.turn_right else 'left'
+            self.get_logger().info(f'Accept: arc {side}, radius={r} m, angle={a} deg')
+            return GoalResponse.ACCEPT
         if d != 0.0 and a != 0.0:
             self.get_logger().warn(f'Reject: both non-zero (distance={d}, angle={a})')
             return GoalResponse.REJECT
@@ -81,16 +93,23 @@ class DrivingNode(Node):
     def execute_callback(self, goal_handle):
         """
         Execute a driving goal by publishing velocity commands over time
-        Handles both linear and angular movements
+        Handles straight moves, turns in place, and circular arcs
         Stops the robot if the goal is canceled
         """
         d = goal_handle.request.distance
         a = goal_handle.request.angle
+        c = goal_handle.request.radius
         v = self.get_parameter('linear_speed').value
         w = self.get_parameter('angular_speed').value
         period = 1.0 / self.get_parameter('rate_hz').value
 
-        if d > 0.0:
+        if c > 0.0:
+            # arc (Day 4 inverse kinematics): w = v / c, t = c * theta / v
+            # slow down on tight arcs so w stays under the robot's limit
+            v = min(v, self.get_parameter('max_angular_speed').value * c)
+            sign = -1.0 if goal_handle.request.turn_right else 1.0   # +angular.z = left
+            linear, angular, duration = v, sign * v / c, c * math.radians(a) / v
+        elif d > 0.0:
             linear, angular, duration = v, 0.0, d / v
         else:
             linear, angular, duration = 0.0, w, math.radians(a) / w
