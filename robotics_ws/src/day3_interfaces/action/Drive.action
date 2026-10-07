@@ -1,6 +1,11 @@
-# Goal (request): exactly one of these should be non-zero
+# Goal (request): one of three commands
+#   move:  distance > 0, angle == 0, radius == 0
+#   turn:  angle > 0,    distance == 0, radius == 0
+#   arc:   radius > 0,   angle in [0, 360], distance == 0
 float64 distance   # meters, must be >= 0
-float64 angle      # degrees, counter-clockwise, must be >= 0
+float64 angle      # degrees, must be >= 0 (turn: counter-clockwise; arc: degrees along the arc)
+float64 radius     # meters, > 0 means "drive an arc" of this radius
+bool turn_right    # arc only: false = turn left (CCW), true = turn right (CW)
 ---
 # Result: empty for now (later: final pose)
 ---
