@@ -44,11 +44,12 @@ class DrivingNode(Node):
     def goal_callback(self, goal: Drive.Goal):
         """
         Accept or reject a driving goal based on distance, angle and radius
-        Reject if any is negative, if both distance and angle are non-zero,
+        Reject if distance or radius is negative, if both distance and angle are non-zero,
         or if an arc has a distance or an angle outside [0, 360]
+        A negative angle is allowed only for a turn in place (turn right)
         """
         d, a, r = goal.distance, goal.angle, goal.radius
-        if d < 0.0 or a < 0.0 or r < 0.0:
+        if d < 0.0 or r < 0.0 or (r > 0.0 and a < 0.0):
             self.get_logger().warn(
                 f'Reject: negative value (distance={d}, angle={a}, radius={r})')
             return GoalResponse.REJECT
@@ -63,7 +64,11 @@ class DrivingNode(Node):
         if d != 0.0 and a != 0.0:
             self.get_logger().warn(f'Reject: both non-zero (distance={d}, angle={a})')
             return GoalResponse.REJECT
-        self.get_logger().info(f'Accept: distance={d} m, angle={a} deg')
+        if a != 0.0:
+            side = 'right' if a < 0.0 else 'left'
+            self.get_logger().info(f'Accept: turn {side} {abs(a)} deg')
+        else:
+            self.get_logger().info(f'Accept: move {d} m')
         return GoalResponse.ACCEPT
 
     # ---------- cancel ----------
@@ -111,7 +116,8 @@ class DrivingNode(Node):
         elif d > 0.0:
             linear, angular, duration = v, 0.0, d / v
         else:
-            linear, angular, duration = 0.0, w, math.radians(a) / w
+            # turn in place: sign of angle picks the direction (+ = left/CCW, - = right/CW)
+            linear, angular, duration = 0.0, math.copysign(w, a), math.radians(abs(a)) / w
 
         start = self.get_clock().now()
         while (self.get_clock().now() - start).nanoseconds / 1e9 < duration:

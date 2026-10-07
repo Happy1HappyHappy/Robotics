@@ -9,7 +9,7 @@ from action_msgs.msg import GoalStatus
 
 from day3_interfaces.action import Drive
 
-HELP = ('Commands:  m <meters>   t <degrees>   a <l|r> <radius m> <degrees> (arc)\n'
+HELP = ('Commands:  m <meters>   t <degrees, - = right>   a <l|r> <radius m> <degrees> (arc)\n'
         '           p / rp (letter P)   8 / r8 (figure-8)   q (quit)')
 
 
@@ -68,12 +68,12 @@ class ExecutiveNode(Node):
 # Extra Credit A: each shape is a list of single-step commands
 # ('m', meters), ('t', degrees), ('a', 'l' or 'r', radius, degrees)
 SHAPES = {
-    # squared "P": stem up, then the bowl on the right
-    'p': [('m', 1.0), ('t', 270), ('m', 0.4), ('t', 270),
-          ('m', 0.5), ('t', 270), ('m', 0.4)],
+    # squared "P": stem up, then the bowl on the right (-90 = right turn)
+    'p': [('m', 1.0), ('t', -90), ('m', 0.4), ('t', -90),
+          ('m', 0.5), ('t', -90), ('m', 0.4)],
     # squared figure-8: CCW square, straight through the center, CW square
     '8': [('m', 0.5), ('t', 90), ('m', 0.5), ('t', 90), ('m', 0.5), ('t', 90),
-          ('m', 1.0), ('t', 270), ('m', 0.5), ('t', 270), ('m', 0.5), ('t', 270),
+          ('m', 1.0), ('t', -90), ('m', 0.5), ('t', -90), ('m', 0.5), ('t', -90),
           ('m', 0.5)],
     # rounded "P": stem up, then a half-circle bowl on the right
     'rp': [('m', 1.0), ('a', 'r', 0.25, 180)],
