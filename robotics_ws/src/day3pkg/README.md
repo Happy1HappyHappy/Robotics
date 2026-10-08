@@ -25,6 +25,22 @@ The Executive waits for each command to finish before it accepts the next one.
 
 ## Build and run
 
+The launch file opens the Executive in an `xterm` window, so install `xterm` first
+(one time, on Ubuntu):
+
+```bash
+sudo apt install xterm
+```
+
+Without it, `ros2 launch` fails to start the Executive. `xterm` also needs a
+desktop display, so over SSH without X forwarding, run the two nodes in separate
+terminals instead:
+
+```bash
+ros2 run day3pkg driver
+ros2 run day3pkg executive
+```
+
 From the workspace root (`robotics_ws`):
 
 ```bash
