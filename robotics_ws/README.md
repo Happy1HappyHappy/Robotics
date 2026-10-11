@@ -1,15 +1,15 @@
 # robotics_ws
 
 ROS 2 (Jazzy) colcon workspace for CS 5335 Robotic Science and Systems. All
-packages drive a TurtleBot 4 through `cmd_vel`.
+packages drive a TurtleBot 4 through `cmd_vel`; `day3pkg` also reads `/odom`.
 
 ## Packages
 
 | Package                                   | Project | What it does                                                         |
 | ----------------------------------------- | ------- | -------------------------------------------------------------------- |
 | [`day2pkg`](src/day2pkg/README.md)         | 2       | Single node that drives a preset path (D shape) from timed segments  |
-| [`day3pkg`](src/day3pkg/README.md)         | 3, 4    | Executive + Driving nodes; drive the robot with typed commands       |
-| `day3_interfaces`                         | 3, 4    | Defines the `Drive.action` used by `day3pkg`                         |
+| [`day3pkg`](src/day3pkg/README.md)         | 3, 4, 5 | Executive + Driving nodes; drive with typed commands, log odometry   |
+| `day3_interfaces`                         | 3, 4, 5 | Defines the `Drive.action` used by `day3pkg`                         |
 
 See each package's README for details.
 
@@ -40,11 +40,15 @@ To build one package only: `colcon build --packages-select <pkg>`.
 
 ```bash
 ros2 run day2pkg node1            # Project 2
-ros2 launch day3pkg day3_launch.py   # Projects 3 and 4
+ros2 launch day3pkg day3_launch.py   # Projects 3, 4 and 5
 ```
+
+For Project 5 (odometry), see the
+[Odometry section of the day3pkg README](src/day3pkg/README.md#odometry).
 
 ## Troubleshooting
 
 - Check that the robot is reachable: `ros2 topic echo /ip`
 - Check the velocity commands being sent: `ros2 topic echo /cmd_vel`
+- Read one odometry message: `ros2 topic echo /odom --once`
 - Topics not showing up: `ros2 daemon stop; ros2 daemon start`

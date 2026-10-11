@@ -1,13 +1,17 @@
 # day3pkg
 
-ROS 2 package for CS 5335 Projects 3 and 4: an **Executive Node** that takes driving
-commands from the user and a **Driving Node** that drives the TurtleBot with
+ROS 2 package for CS 5335 Projects 3, 4 and 5: an **Executive Node** that takes
+driving commands from the user and a **Driving Node** that drives the TurtleBot with
 `cmd_vel`. The two nodes communicate through the `drive` action
-(`day3_interfaces/action/Drive.action`).
+(`day3_interfaces/action/Drive.action`). For Project 5, the Driving Node also reads
+`/odom` and logs how far odometry says the robot moved, and its error, after each
+command.
 
 ```
  user ──> Executive Node ──(drive action)──> Driving Node ──(cmd_vel)──> TurtleBot
           executive.py       Drive.action      driver.py      TwistStamped
+                                                    ^
+                                                    └──(odom)── Odometry
 ```
 
 ## Commands
@@ -70,3 +74,38 @@ Goal fields (the Result and Feedback are empty for now):
 | `distance` | `float64` | Meters to drive straight, `>= 0`                                          |
 | `angle`    | `float64` | Turn: degrees, sign gives direction. Arc: degrees along the arc, 0 to 360 |
 | `radius`   | `float64` | Arc radius in meters; `> 0` means this is an arc command                  |
+
+## Odometry
+
+The Driving Node subscribes to `/odom`. After each command finishes, it waits for the
+robot to stop, then logs the motion odometry reports and its error from the command
+(odometry minus target, in the robot's starting frame):
+
+```
+Odom: dist=1.0043 m, forward=1.0039 m, lateral=-0.0281 m, dyaw=-1.35 deg
+Error (odom - target): forward=0.0039 m, lateral=-0.0281 m, position=0.0284 m, yaw=-1.35 deg
+```
+
+The target for `m` is the distance straight ahead, for `t` the turn angle, and for
+`a` the arc's end point and heading. For a full circle (`a l 0.5 360`), `position`
+is how far odometry says the robot ended up from its start. Nothing is logged for a
+canceled goal.
+
+To read one Odometry message by hand:
+
+```bash
+ros2 topic echo /odom --once
+```
+
+To append it to a file instead (run it before and after each command, so every
+run's start and end messages are kept in order):
+
+```bash
+ros2 topic echo /odom --once >> odom_log.txt
+```
+
+To drive with the robot's built-in `DriveDistance` action instead of this package:
+
+```bash
+ros2 action send_goal /drive_distance irobot_create_msgs/action/DriveDistance "{distance: 1.0, max_translation_speed: 0.15}"
+```
