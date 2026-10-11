@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='robo',
     maintainer_email='robo@todo.todo',
-    description='Project 3: ROS Actions',
+    description='Projects 3-5: ROS Actions and Odometry',
     license='Apache-2.0',
     extras_require={
         'test': [
