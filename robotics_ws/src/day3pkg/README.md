@@ -91,6 +91,29 @@ The target for `m` is the distance straight ahead, for `t` the turn angle, and f
 is how far odometry says the robot ended up from its start. Nothing is logged for a
 canceled goal.
 
+It then logs a table of the last 20 results (older runs are dropped), with the mean
+and sample standard deviation of each error column:
+
+```
+Odometry results (last 20):
+ run command         forward  lateral     dyaw  err_fwd  err_pos  err_yaw
+   1 m 1              1.0100   0.0200     0.57   0.0100   0.0224     0.57
+   2 m 1              1.0300   0.0000     0.00   0.0300   0.0300     0.00
+mean                                             0.0200   0.0262     0.29
+ std                                             0.0141   0.0054     0.41
+```
+
+The table covers every command type, so restart the Driving Node before a series of
+runs (e.g. 10 × `m 1.0`) to get the mean and std for that series alone.
+
+The same table is saved to `odom_results.csv` in the directory you started the node
+from, and the file is overwritten after every command so it always matches the latest
+table. To save it somewhere else, or turn it off with `''`:
+
+```bash
+ros2 run day3pkg driver --ros-args -p csv_path:=/home/robo/odom_results.csv
+```
+
 To read one Odometry message by hand:
 
 ```bash

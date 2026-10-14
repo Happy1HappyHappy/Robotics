@@ -2,8 +2,11 @@
 Driving node for the day3pkg package
 """
 
+import csv
 import math
+import statistics
 import time
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -47,6 +50,7 @@ class DrivingNode(Node):
         self.declare_parameter('max_angular_speed', 1.82)  # rad/s, Waffle limit (Burger 2.84)
         self.declare_parameter('rate_hz', 10.0)
         self.declare_parameter('settle_time', 1.0)     # s, wait after stop before reading odom
+        self.declare_parameter('csv_path', 'odom_results.csv')  # '' = do not save
 
         self.cmd_pub_ = self.create_publisher(TwistStamped, 'cmd_vel', 10)
 
@@ -55,6 +59,10 @@ class DrivingNode(Node):
         self.latest_odom_ = None
         self.odom_sub_ = self.create_subscription(
             Odometry, 'odom', self.odom_callback, qos_profile_sensor_data)
+
+        # odometry results of the most recent goals, oldest dropped first
+        self.history_ = deque(maxlen=20)
+        self.run_count_ = 0
 
         self.action_server_ = ActionServer(
             self, Drive, 'drive',
@@ -85,12 +93,13 @@ class DrivingNode(Node):
         p = msg.pose.pose.position
         return p.x, p.y, yaw_from_quaternion(msg.pose.pose.orientation)
 
-    def report_motion(self, start_pose, end_pose, target):
+    def report_motion(self, start_pose, end_pose, target, label):
         """
         Log the motion between two odometry poses, and its error from the target
         forward/lateral are the displacement expressed in the robot's starting frame,
         i.e. the translation part of inv(T_start) * T_end
         target: commanded (forward m, lateral m, yaw rad) in the same frame
+        label: short text for the command, shown in the results table
         """
         x0, y0, th0 = start_pose
         x1, y1, th1 = end_pose
@@ -107,6 +116,53 @@ class DrivingNode(Node):
             f'Error (odom - target): forward={ef:.4f} m, lateral={el:.4f} m, '
             f'position={math.hypot(ef, el):.4f} m, '
             f'yaw={math.degrees(wrap_angle(dyaw - tyaw)):.2f} deg')
+
+        self.run_count_ += 1
+        self.history_.append((self.run_count_, label, forward, lateral, math.degrees(dyaw),
+                              ef, math.hypot(ef, el),
+                              math.degrees(wrap_angle(dyaw - tyaw))))
+        self.log_history()
+
+    def log_history(self):
+        """
+        Log a table of the last 20 odometry results, with the mean and sample
+        standard deviation of each error column
+        """
+        rows = [f'{"run":>4} {"command":<14} {"forward":>8} {"lateral":>8} {"dyaw":>8} '
+                f'{"err_fwd":>8} {"err_pos":>8} {"err_yaw":>8}']
+        for n, label, fwd, lat, dyaw, ef, ep, ey in self.history_:
+            rows.append(f'{n:>4} {label:<14} {fwd:>8.4f} {lat:>8.4f} {dyaw:>8.2f} '
+                        f'{ef:>8.4f} {ep:>8.4f} {ey:>8.2f}')
+        errors = list(zip(*[h[5:] for h in self.history_]))
+        means = [statistics.mean(col) for col in errors]
+        stds = [statistics.stdev(col) if len(col) > 1 else 0.0 for col in errors]
+        pad = ' ' * 43    # skip run..dyaw so the stats line up under the error columns
+        rows.append(f'{"mean":>4}{pad}{means[0]:>8.4f} {means[1]:>8.4f} {means[2]:>8.2f}')
+        rows.append(f'{"std":>4}{pad}{stds[0]:>8.4f} {stds[1]:>8.4f} {stds[2]:>8.2f}')
+        self.get_logger().info('Odometry results (last 20):\n' + '\n'.join(rows))
+        self.save_csv(means, stds)
+
+    def save_csv(self, means, stds):
+        """
+        Overwrite the CSV file with the same table as log_history (last 20 results,
+        then mean and std rows), so the file always matches the latest table
+        """
+        path = self.get_parameter('csv_path').value
+        if not path:
+            return
+        try:
+            with open(path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['run', 'command', 'forward_m', 'lateral_m', 'dyaw_deg',
+                                 'err_forward_m', 'err_position_m', 'err_yaw_deg'])
+                for n, label, fwd, lat, dyaw, ef, ep, ey in self.history_:
+                    writer.writerow([n, label, f'{fwd:.4f}', f'{lat:.4f}', f'{dyaw:.2f}',
+                                     f'{ef:.4f}', f'{ep:.4f}', f'{ey:.2f}'])
+                for name, stats in (('mean', means), ('std', stds)):
+                    writer.writerow([name, '', '', '', '', f'{stats[0]:.4f}',
+                                     f'{stats[1]:.4f}', f'{stats[2]:.2f}'])
+        except OSError as e:
+            self.get_logger().warn(f'Could not save {path}: {e}')
 
     # ---------- accept / reject ----------
     def goal_callback(self, goal: Drive.Goal):
@@ -185,13 +241,16 @@ class DrivingNode(Node):
             # arc end point in the start frame: (c sin(theta), +-c (1 - cos(theta)))
             th = math.radians(a)
             target = (c * math.sin(th), sign * c * (1.0 - math.cos(th)), sign * th)
+            label = f'a {"r" if goal_handle.request.turn_right else "l"} {c:g} {a:g}'
         elif d > 0.0:
             linear, angular, duration = v, 0.0, d / v
             target = (d, 0.0, 0.0)
+            label = f'm {d:g}'
         else:
             # turn in place: sign of angle picks the direction (+ = left/CCW, - = right/CW)
             linear, angular, duration = 0.0, math.copysign(w, a), math.radians(abs(a)) / w
             target = (0.0, 0.0, math.radians(a))
+            label = f't {a:g}'
 
         start_pose = self.snapshot_pose()
         if start_pose is None:
@@ -215,7 +274,7 @@ class DrivingNode(Node):
         time.sleep(self.get_parameter('settle_time').value)
         end_pose = self.snapshot_pose()
         if start_pose is not None and end_pose is not None:
-            self.report_motion(start_pose, end_pose, target)
+            self.report_motion(start_pose, end_pose, target, label)
 
         goal_handle.succeed()
         self.get_logger().info('Goal succeeded')
