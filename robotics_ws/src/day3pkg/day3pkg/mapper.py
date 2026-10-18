@@ -1,5 +1,5 @@
 """
-Grid node for the day6pkg package
+Grid node for the day3pkg package (Project 6)
 Builds an occupancy grid from the LiDAR (/scan), placing each scan with odometry (/odom)
 and the LiDAR's mounting on the robot (TF)
 Task 1: the first scan is added with the sensor at the origin
@@ -24,8 +24,8 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
-from day6pkg.grid import OccupancyGrid
-from day6pkg.render import grid_image, summary_image
+from day3pkg.grid import OccupancyGrid
+from day3pkg.render import grid_image, summary_image
 
 WINDOW = 'Occupancy grid'
 
@@ -55,7 +55,7 @@ def pose_of(T):
 
 class GridNode(Node):
     """
-    Grid node class for the day6pkg package
+    Grid node class for the day3pkg package
     Frames: odom (odometry), base (the robot, /odom's child frame), sensor (the LiDAR,
     /scan's frame), and world (the grid): origin at the sensor's start position, x forward
     and y left along the robot's start heading

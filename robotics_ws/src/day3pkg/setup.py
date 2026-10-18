@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='robo',
     maintainer_email='robo@todo.todo',
-    description='Projects 3-5: ROS Actions and Odometry',
+    description='Projects 3-6: ROS Actions, Odometry and Occupancy Grid',
     license='Apache-2.0',
     extras_require={
         'test': [
@@ -29,6 +29,8 @@ setup(
         'console_scripts': [
             'driver = day3pkg.driver:main',
             'executive = day3pkg.executive:main',
+            'mapper = day3pkg.mapper:main',
+            'offline_grid = day3pkg.offline:main',
         ],
     },
 )

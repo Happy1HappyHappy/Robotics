@@ -6,8 +6,8 @@ import math
 
 import pytest
 
-from day6pkg.grid import bresenham, log_odds, OccupancyGrid
-from day6pkg.offline import load_scan
+from day3pkg.grid import bresenham, log_odds, OccupancyGrid
+from day3pkg.offline import load_scan
 
 
 @pytest.mark.parametrize('end', [(5, 2), (2, 5), (-5, 2), (2, -5), (-3, -3), (0, 4), (4, 0)])

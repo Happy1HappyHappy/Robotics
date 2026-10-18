@@ -19,7 +19,7 @@ built on ROS 2 Jazzy and a TurtleBot 4.
 | 3       | ROS actions                   | [`day3pkg`](robotics_ws/src/day3pkg/README.md)                     |
 | 4       | Turns and arcs (kinematics)   | [`day3pkg`](robotics_ws/src/day3pkg/README.md)                     |
 | 5       | Odometry                      | [`day3pkg`](robotics_ws/src/day3pkg/README.md#odometry)           |
-| 6       | Occupancy grid from LiDAR     | [`day6pkg`](robotics_ws/src/day6pkg/README.md)                     |
+| 6       | Occupancy grid from LiDAR     | [`day3pkg`](robotics_ws/src/day3pkg/README.md#occupancy-grid-project-6) |
 
 ## Quick start
 

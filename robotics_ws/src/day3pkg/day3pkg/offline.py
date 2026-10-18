@@ -5,7 +5,7 @@ Save one message while connected to the robot (--full-length keeps all the range
 without it, 'ros2 topic echo' cuts arrays off after 128 elements):
     ros2 topic echo /scan --once --full-length > scan.yaml
 Then, offline:
-    ros2 run day6pkg offline_grid scan.yaml
+    ros2 run day3pkg offline_grid scan.yaml
 """
 
 import argparse
@@ -15,8 +15,8 @@ import os
 import cv2
 import yaml
 
-from day6pkg.grid import OccupancyGrid
-from day6pkg.render import grid_image
+from day3pkg.grid import OccupancyGrid
+from day3pkg.render import grid_image
 
 
 def load_scan(path):
