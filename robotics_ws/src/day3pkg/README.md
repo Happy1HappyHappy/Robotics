@@ -85,7 +85,35 @@ robot to stop, then logs the motion odometry reports and its error from the comm
 Odom: dist=1.0043 m, forward=1.0039 m, lateral=-0.0281 m, dyaw=-1.35 deg
 Error (odom - target): forward=0.0039 m, lateral=-0.0281 m, position=0.0284 m, yaw=-1.35 deg
 ```
+Everything is measured in the **robot's starting frame**: the forward axis is the
+robot's heading at the start, left is +lateral, right is −lateral.
+(Lateral offset is exaggerated in the drawing.)
 
+```
+                 ↑ forward axis (heading at start)
+                 │        ↗ heading at end
+                 │       ╱   angle from forward axis = dyaw
+                 │ lateral   (−1.35°, turned right)
+                 ├───────● end
+                 │      ╱
+                 │     ╱
+     forward     │    ╱
+   = 1.0039 m    │   ╱  dist = 1.0043 m
+                 │  ╱
+                 │ ╱
+                 │╱
+    left (+) ←───● start ───→ right (−)
+```
+
+| Field | Meaning | Formula |
+| --- | --- | --- |
+| `forward` | How far the robot moved along its starting heading | `cos θ0·dx + sin θ0·dy` |
+| `lateral` | How far it drifted left (+) or right (−) of that line | `−sin θ0·dx + cos θ0·dy` |
+| `dist` | Straight-line distance from start to end (the hypotenuse) | `√(dx² + dy²)` |
+| `dyaw` | How much the heading changed (left/CCW +, right/CW −) | `θ1 − θ0` |
+
+- `forward`, `lateral` and `dist` form a right triangle: `dist² = forward² + lateral²`
+- `dyaw` is independent of position; it only describes the change in heading
 The target for `m` is the distance straight ahead, for `t` the turn angle, and for
 `a` the arc's end point and heading. For a full circle (`a l 0.5 360`), `position`
 is how far odometry says the robot ended up from its start. Nothing is logged for a
