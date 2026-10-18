@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# colcon build outputs
+build/
+install/
+log/
+
+# Editors
+.vscode/
+.idea/
+
+# Claude Code per-user settings (.claude/skills/ stays tracked)
+.claude/settings.local.json
