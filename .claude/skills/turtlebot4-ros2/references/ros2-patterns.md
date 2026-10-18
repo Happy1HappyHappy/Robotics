@@ -29,6 +29,7 @@ slides are pseudocode. When copying from them, fix these known errors:
 - [Services](#services)
 - [Actions](#actions)
 - [Stopping on every exit path](#stopping-on-every-exit-path)
+- [Testing without the robot](#testing-without-the-robot)
 - [Defining interfaces](#defining-interfaces)
 - [Parameters](#parameters)
 - [Launch files](#launch-files)
@@ -377,6 +378,78 @@ finally:
 
 These software stops are an extra layer, not a replacement for the robot's own protections
 (cliff detection, command timeout, e-stop).
+
+## Testing without the robot
+
+Build and source the workspace first. Put `timeout` in front of anything that waits for data.
+
+**Make local nodes see each other.** If the terminal is set up as a client of the robot's
+Discovery Server and the robot is off, even your own nodes can't discover each other. For
+offline work, in that terminal only:
+
+```bash
+printenv | grep -E 'ROS_DISCOVERY_SERVER|ROS_SUPER_CLIENT'   # set? then:
+unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
+ros2 daemon stop; ros2 daemon start
+```
+
+Open a fresh terminal (or re-source the setup files) to reconnect to the robot later.
+
+**Watch what your node does**
+
+```bash
+ros2 run day3pkg driver
+ros2 node info /driving_node                  # its publishers, subscribers, actions
+timeout 5 ros2 topic echo /cmd_vel --once     # what it commands
+timeout 5 ros2 topic hz /cmd_vel              # how often
+```
+
+**Feed it inputs**
+
+```bash
+# fake odometry at 20 Hz: robot standing still at the origin
+ros2 topic pub -r 20 /odom nav_msgs/msg/Odometry "{header: {frame_id: odom}, child_frame_id: base_link}"
+
+# a goal to your own action server, with feedback
+timeout 30 ros2 action send_goal /drive day3_interfaces/action/Drive "{distance: 0.5}" --feedback
+
+# a fake bump, to test the hazard stop (needs irobot_create_msgs installed on the laptop)
+ros2 topic pub --once /hazard_detection irobot_create_msgs/msg/HazardDetectionVector "{detections: [{type: 1}]}"
+```
+
+**Replay real data.** Record once while connected, then replay offline. Recorded odometry does
+not react to your commands, so use a replay to test processing (filters, mapping), not
+closed-loop driving.
+
+```bash
+ros2 bag record -o odom_run /odom /scan /tf /tf_static          # on the robot, once
+ros2 bag play odom_run --clock                                  # later, offline
+ros2 run day3pkg driver --ros-args -p use_sim_time:=true        # node time follows the bag
+```
+
+**Simulation**, if installed. Run it only while not connected to a robot (or in a different
+`ROS_DOMAIN_ID`), so simulated and real topics don't mix. Its topic names, namespaces and types
+can differ from the real robot, so check them with `ros2 topic list -t`.
+
+```bash
+ros2 pkg list | grep turtlebot4_gz_bringup                      # installed?
+sudo apt install ros-jazzy-turtlebot4-simulator ros-jazzy-irobot-create-nodes   # if not
+ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py
+```
+
+**Pure logic without ROS.** Keep math in plain functions so it can be tested with pytest in the
+package's `test/` folder, and run it with `colcon test`:
+
+```python
+# test/test_kinematics.py
+import math
+
+from day3pkg.driver import wrap_angle
+
+
+def test_wrap_angle():
+    assert math.isclose(wrap_angle(3 * math.pi / 2), -math.pi / 2)
+```
 
 ## Defining interfaces
 

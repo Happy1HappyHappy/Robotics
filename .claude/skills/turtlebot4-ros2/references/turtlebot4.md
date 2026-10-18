@@ -90,12 +90,20 @@ timestamp (see `robotics-math.md` for occupancy grids).
 
 ## Looking things up
 
+Without the robot (installed packages only):
+
 ```bash
 echo $ROS_DISTRO
+ros2 interface show <pkg>/msg/<Type>  # exact fields, e.g. irobot_create_msgs/action/DriveDistance
+ros2 pkg list | grep -iE 'create|turtlebot'
+```
+
+With the robot connected (an empty topic list means "not connected", not "doesn't exist"):
+
+```bash
 ros2 topic list -t                    # every topic with its type
 ros2 topic info -v /cmd_vel           # type + QoS of publishers and subscribers
-ros2 topic echo /odom --once          # one real message
-ros2 interface show <pkg>/msg/<Type>  # exact fields
+timeout 5 ros2 topic echo /odom --once   # one real message (timeout: echo waits forever)
 ros2 action list -t                   # drive goals, dock, ...
 ros2 run tf2_tools view_frames        # frame tree (PDF)
 ros2 param list /motion_control       # robot parameters such as speed limits

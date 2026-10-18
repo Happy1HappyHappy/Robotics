@@ -3,8 +3,9 @@ name: turtlebot4-ros2
 description: >
   Guidance for ROS 2 and robotics work in this CS 5335 TurtleBot 4 repository: how to structure
   robot software, how to verify code against the installed ROS distribution and robot instead
-  of trusting examples, when not to add complexity, and the safety checks for code that moves
-  the robot or uses frames, units, time or QoS. Includes background knowledge on the TurtleBot 4
+  of trusting examples, how to develop and test when the robot is not connected, when not to
+  add complexity, and the safety checks for code that moves the robot or uses frames, units,
+  time or QoS. Includes background knowledge on the TurtleBot 4
   and robotics (kinematics, odometry, frames, sensors, Kalman filter, occupancy grids). Use when
   writing, reviewing, designing or debugging any node, launch file, interface or robot behavior
   here, and when explaining robotics concepts from the course.
@@ -41,20 +42,53 @@ explicit instruction → the course slides → this skill → the reference file
 
 ## Step 2: Check the real system
 
-Before writing code, establish the facts instead of assuming them:
+Establish the facts instead of assuming them. Some checks need only the laptop. Others need the
+robot to be connected.
+
+**Works without the robot** (static: what is installed and built):
 
 ```bash
 echo $ROS_DISTRO                      # ROS distribution
-ros2 topic list -t                    # topics actually offered, with types
-ros2 topic info -v <topic>            # message type and QoS of each endpoint
-ros2 interface show <pkg>/msg/<Type>  # exact fields
-ros2 action list -t                   # available actions
-ros2 run tf2_tools view_frames        # frame names and tree
 ros2 pkg list                         # installed packages
+ros2 interface list                   # message/service/action types available
+ros2 interface show <pkg>/msg/<Type>  # exact fields (if that package is installed)
+ros2 pkg executables <pkg>            # what your packages provide
 ```
 
-The lab connection setup is in the repo's README and `related_cmds.txt`. If you cannot run these
-commands here (no ROS installed, no robot), say so and give the user the commands to run.
+**Needs the robot connected** (dynamic: what is running right now):
+
+```bash
+ros2 topic list -t                    # topics actually offered, with types
+ros2 topic info -v <topic>            # message type and QoS of each endpoint
+timeout 5 ros2 topic echo <topic> --once
+ros2 action list -t                   # available actions
+ros2 run tf2_tools view_frames        # frame names and tree
+```
+
+Put a `timeout` in front of any command that waits for data (`topic echo`, `topic hz`,
+`action send_goal`). With no publisher, it waits forever.
+
+### If the robot is not connected
+
+This is normal while developing, so don't stall on it.
+
+- **Signs**: `ros2 topic list` shows only `/parameter_events` and `/rosout`, and `echo` prints
+  nothing.
+- An empty topic list means "not connected", not "this topic does not exist". Do not change code
+  because a robot topic is missing.
+- Ask whether the user is working offline. If they expect to be connected, point them to the
+  connection steps in the README and `related_cmds.txt` (`ROS_DOMAIN_ID`, Discovery Server,
+  `ros2 daemon stop; ros2 daemon start`).
+- If `ros2 topic list` does not even show the topics of a node you just started on the laptop,
+  the terminal is probably configured as a client of the robot's Discovery Server, and with no
+  server reachable, local nodes can't find each other. Check with
+  `printenv | grep -E 'ROS_DISCOVERY_SERVER|ROS_SUPER_CLIENT'`. For offline work, unset them in
+  that terminal (see [references/ros2-patterns.md](references/ros2-patterns.md#testing-without-the-robot)).
+- Continue with the static checks and the reference files. Mark every robot-specific fact you
+  relied on (topic names, message types, QoS, frame names) as **not yet checked on the robot**.
+
+If you cannot run commands here at all (no ROS installed), say so and give the user the
+commands to run.
 
 ## Step 3: Design with the simplest correct architecture
 
@@ -109,6 +143,23 @@ colcon test --packages-select <pkgs> && colcon test-result --verbose
 Read the errors, fix them, and repeat until the code builds and runs. Do not stop at code that
 only looks plausible.
 
+### Testing without the robot
+
+Your nodes start without the robot; they just receive no robot data. They must start cleanly,
+log that they are waiting (throttled), and neither move nor crash until data arrives. Then test
+them with one of these (commands in
+[references/ros2-patterns.md](references/ros2-patterns.md#testing-without-the-robot)):
+
+| Method | Good for |
+| --- | --- |
+| Run the node and watch its outputs (`topic echo`, `node info`) | Does it publish the right commands, at the right rate, in the right type? |
+| Feed fake inputs (`ros2 topic pub`, `ros2 action send_goal` to your own server) | Logic and edge cases: goal validation, cancel, stop paths |
+| Replay a recording (`ros2 bag record` once on the robot, `ros2 bag play` later) | Sensor processing on real data: odometry, LiDAR, filters, mapping |
+| Simulation (TurtleBot 4 Gazebo simulator, if installed) | Closed-loop motion without the robot. Close to the real robot, but not identical |
+| Plain Python tests of pure functions | Kinematics, transforms, Kalman filter, grid updates |
+
+Passing offline tests does not prove the code behaves correctly on the robot.
+
 ## Safety checklist
 
 Anything that moves the robot, or uses poses, frames, time or sensor data, must pass every item
@@ -143,8 +194,9 @@ before it is called done:
 
 ## Step 6: Report what was verified
 
-State exactly what was done: built, linted, run without the robot, or run on the robot. Name
-what still has to be checked on the robot and how. Never claim behavior that was not observed.
+State exactly what was done: built, linted, tested offline (and how), or run on the robot. If
+the robot was not connected, list the robot-specific facts and behaviors that still have to be
+checked on it, each with the command to check it. Never claim behavior that was not observed.
 
 ## Reference files
 
