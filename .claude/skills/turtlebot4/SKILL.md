@@ -19,6 +19,9 @@ TurtleBot 4, which is a Raspberry Pi 4 on top of an iRobot Create 3 base. Stack:
 ROS 2 **Jazzy**, Python (`rclpy`). Do not suggest Ubuntu 26.04 / ROS 2 Lyrical, because the
 TurtleBot 4 does not support them.
 
+This skill follows the course slides, and the slides are the standard. If another skill (such as
+`ros2` or `robotics-software-principles`) says something different, follow this one.
+
 Read the matching reference file before writing code in that area:
 
 | File | Covers |
@@ -139,8 +142,11 @@ When adding or changing code, match these:
 - **Packaging**: register executables in `setup.py` `console_scripts`; install `launch/` and
   `config/` through `data_files` with `glob`; add every message package used to
   `package.xml` as `<depend>`.
-- **Lint**: each package runs `ament_flake8` (99-char lines, Google import order) and
-  `ament_pep257`. Existing code uses single quotes.
+- **Lint**: the generated `test/` folders run `ament_flake8` (99-char lines, Google import
+  order, single quotes) and `ament_pep257`. The existing code already fails some docstring
+  (D205, D400) and import-order (I100) checks, so `colcon test` reports those failures. Keep
+  new lines within 99 characters with single quotes. Don't reformat existing files unless asked,
+  and don't claim the tests pass.
 - **Docs**: each package has a README (what it does, build/run, commands, parameters). Update
   it, and the tables in the root and `robotics_ws` READMEs, when behavior or packages change.
 

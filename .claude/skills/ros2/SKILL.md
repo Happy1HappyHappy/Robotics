@@ -1,278 +1,131 @@
 ---
 name: ros2
 description: >
-  Comprehensive best practices, design patterns, and common pitfalls for ROS2 (Robot Operating System 2)
-  development. Use this skill when building ROS2 nodes, packages, launch files, components, or debugging
-  ROS2 systems. Trigger whenever the user mentions ROS2, colcon, rclpy, rclcpp, DDS, QoS, lifecycle nodes,
-  managed nodes, ROS2 launch, ROS2 parameters, ROS2 actions, nav2, MoveIt2, micro-ROS, or any ROS2-era
-  robotics middleware. Also trigger for ROS2 workspace setup, DDS tuning, intra-process communication,
-  ROS2 security, or deploying ROS2 in production. Also trigger for colcon build issues, ament_cmake,
-  ament_python, CMakeLists.txt for ROS2, package.xml dependencies, rosdep, workspace overlays, custom
-  message generation, or ROS2 build troubleshooting. Covers Humble, Iron, Jazzy, and Rolling distributions.
+  ROS 2 Jazzy best practices for Python (rclpy) work in the CS 5335 workspace: nodes, packages,
+  the colcon workspace, package.xml and setup.py, custom messages, services and actions, launch
+  files, parameters, QoS, and debugging with the ros2 command line. Use when building or fixing
+  ROS 2 nodes, packages, launch files or interfaces, when colcon build fails, or when topics do
+  not connect. For anything involving the TurtleBot 4 or this repository, the turtlebot4 skill
+  (based on the course slides) takes precedence.
 ---
 
-# ROS2 Development Skill
+# ROS 2 Development Skill
+
+> Adapted from [arpitg1304/robotics-agent-skills](https://github.com/arpitg1304/robotics-agent-skills)
+> (commit f9bc546, Apache-2.0) for CS 5335. **Modified**: removed everything that conflicts with
+> the course slides (C++/rclcpp, lifecycle nodes, components, DDS and discovery changes, multiple
+> workspaces, `--symlink-install`, the production checklist) and rewrote the examples for ROS 2
+> Jazzy and the course conventions. The course rules are in the `turtlebot4` skill. Follow that
+> skill wherever the two differ.
+
+## Course scope
+
+- ROS 2 **Jazzy** on Ubuntu 24.04, **Python only** (`rclpy`). Do not write C++ or `rclcpp`.
+- **One** workspace, `robotics_ws/`, which is also the git repository.
+- Python nodes live in `ament_python` packages. Messages, services and actions live in a
+  separate `ament_cmake` interfaces package.
+- Not part of the course, so do not introduce them: lifecycle (managed) nodes, components and
+  composition, intra-process communication, DDS or discovery tuning, SROS2, micro-ROS, MoveIt 2.
 
 ## When to Use This Skill
-- Building ROS2 packages, nodes, or component containers
-- Setting up colcon workspaces, ament_cmake, or ament_python packages
-- Writing CMakeLists.txt, package.xml, or setup.py for ROS2
-- Defining custom messages, services, or actions
-- Writing Python launch files with conditional logic
-- Configuring DDS middleware and QoS profiles
-- Implementing lifecycle (managed) nodes
-- Working with Nav2, MoveIt2, or other ROS2 frameworks
-- Debugging DDS discovery, QoS mismatches, or build failures
-- Deploying ROS2 to production or embedded systems (micro-ROS)
-- Setting up CI/CD for ROS2 packages
 
-## Core Architecture
+- Writing or fixing a ROS 2 node in Python
+- Workspace and `colcon build` problems, `package.xml`, `setup.py`
+- Defining custom messages, services or actions
+- Launch files and parameters
+- Topics that do not connect (QoS), missing nodes or executables
 
-### 1. Node Design Patterns
+## Node pattern (rclpy)
 
-**Basic Node (rclpy)**:
+One node per program, one `Node` subclass per file (Day 2 slides):
+
 ```python
-#!/usr/bin/env python3
+"""
+Example node: publish the closest LiDAR range as text at a fixed rate
+"""
+
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 
-class PerceptionNode(Node):
+
+class ScanSummaryNode(Node):
+    """
+    Subscribe to /scan and publish a short summary on a timer
+    """
     def __init__(self):
-        super().__init__('perception_node')
+        super().__init__('scan_summary_node')
 
-        # 1. Declare parameters with types and descriptions
-        self.declare_parameter('rate_hz', 30.0,
-            descriptor=ParameterDescriptor(
-                description='Processing rate in Hz',
-                floating_point_range=[FloatingPointRange(
-                    from_value=1.0, to_value=120.0, step=0.0
-                )]
-            ))
-        self.declare_parameter('confidence_threshold', 0.7)
-        self.declare_parameter('frame_id', 'camera_link')
+        # 1. parameters: the type comes from the default value
+        self.declare_parameter('rate_hz', 2.0)    # Hz
 
-        # 2. Read parameters
+        # 2. publishers and subscribers: queue depth 10, sensor QoS for robot sensors
+        self.summary_pub_ = self.create_publisher(String, 'scan_summary', 10)
+        self.latest_scan_ = None
+        self.scan_sub_ = self.create_subscription(
+            LaserScan, 'scan', self.scan_callback, qos_profile_sensor_data)
+
+        # 3. timer for periodic work
         rate_hz = self.get_parameter('rate_hz').value
-        self.threshold = self.get_parameter('confidence_threshold').value
-        self.frame_id = self.get_parameter('frame_id').value
+        self.timer_ = self.create_timer(1.0 / rate_hz, self.timer_callback)
+        self.get_logger().info(f'scan_summary_node started at {rate_hz} Hz')
 
-        # 3. Set up QoS profiles
-        sensor_qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1
-        )
-        reliable_qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10
-        )
-
-        # 4. Publishers first, then subscribers
-        self.det_pub = self.create_publisher(
-            DetectionArray, 'detections', reliable_qos)
-
-        self.image_sub = self.create_subscription(
-            Image, 'camera/image_raw', self.image_callback, sensor_qos)
-
-        # 5. Timers for periodic work
-        self.timer = self.create_timer(1.0 / rate_hz, self.timer_callback)
-
-        # 6. Parameter change callback
-        self.add_on_set_parameters_callback(self.param_callback)
-
-        self.get_logger().info(
-            f'Perception node started at {rate_hz}Hz, '
-            f'threshold={self.threshold}')
-
-    def param_callback(self, params):
-        """Handle runtime parameter changes (replaces dynamic_reconfigure)"""
-        for param in params:
-            if param.name == 'confidence_threshold':
-                self.threshold = param.value
-                self.get_logger().info(f'Threshold updated to {param.value}')
-        return SetParametersResult(successful=True)
-
-    def image_callback(self, msg):
-        # Process incoming images
-        pass
+    def scan_callback(self, msg: LaserScan):
+        """
+        Keep only the latest scan; the timer does the work
+        """
+        self.latest_scan_ = msg
 
     def timer_callback(self):
-        # Periodic work
-        pass
+        """
+        Publish the closest valid range
+        """
+        scan = self.latest_scan_
+        if scan is None:
+            return
+        valid = [r for r in scan.ranges if scan.range_min <= r <= scan.range_max]
+        msg = String()
+        msg.data = f'closest={min(valid):.2f} m' if valid else 'no valid ranges'
+        self.summary_pub_.publish(msg)
+
 
 def main(args=None):
+    """
+    Entry point: create the node and spin until Ctrl-C
+    """
     rclpy.init(args=args)
-    node = PerceptionNode()
+    node = ScanSummaryNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
+
 
 if __name__ == '__main__':
     main()
 ```
 
-**Basic Node (rclcpp)**:
-```cpp
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <vision_msgs/msg/detection2_d.hpp>
-#include <memory>
+- Attributes that hold ROS handles end in `_` (`self.summary_pub_`), as in the slides and the
+  repo.
+- The slides end `main()` with `rclpy.shutdown()`. After Ctrl-C the context may already be shut
+  down, so the repo uses `rclpy.try_shutdown()` (or `if rclpy.ok(): rclpy.shutdown()`).
+- Changing a parameter while the node runs needs a parameter callback, which the slides call
+  "beyond this class". Read parameters where you use them, or restart the node.
 
-class PerceptionNode : public rclcpp::Node {
-public:
-    PerceptionNode() : Node("perception_node") {
-        // Declare and get parameters
-        this->declare_parameter("rate_hz", 30.0);
-        this->declare_parameter("confidence_threshold", 0.7);
-        double rate_hz = this->get_parameter("rate_hz").as_double();
+## QoS
 
-        // QoS
-        auto sensor_qos = rclcpp::SensorDataQoS();
-        auto reliable_qos = rclcpp::QoS(10).reliable();
+- **Course default**: queue depth 10, e.g. `self.create_publisher(Type, 'topic', 10)`. That
+  gives RELIABLE, VOLATILE, KEEP_LAST(10).
+- **Robot sensor topics** (`/odom`, `/scan`, `/imu`, …): subscribe with
+  `qos_profile_sensor_data`. It is best-effort, so it connects to either kind of publisher.
 
-        // Publishers and subscribers
-        det_pub_ = this->create_publisher<vision_msgs::msg::Detection2D>("detections", reliable_qos);
-        image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "camera/image_raw", sensor_qos, [this](const std::shared_ptr<const sensor_msgs::msg::Image>& msg){
-                this->image_callback(msg);
-            });
+**Compatibility matrix**:
 
-        timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(static_cast<int>(1000.0 / rate_hz)),
-            [this](){ this->timer_callback(); });
-
-        RCLCPP_INFO(this->get_logger(), "Perception node started at %.1fHz", rate_hz);
-    }
-
-private:
-    void image_callback(const std::shared_ptr<const sensor_msgs::msg::Image>& msg) {
-        // Use shared_ptr for zero-copy potential
-    }
-    void timer_callback() {}
-
-    rclcpp::Publisher<vision_msgs::msg::Detection2D>::SharedPtr det_pub_;
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
-    rclcpp::TimerBase::SharedPtr timer_;
-};
-
-int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<PerceptionNode>());
-    rclcpp::shutdown();
-    return 0;
-}
-```
-
-### 2. Lifecycle (Managed) Nodes
-
-Use lifecycle nodes for production systems where you need deterministic startup, shutdown, and error recovery. This is one of ROS2's most important features over ROS1.
-
-**State Machine**: `Unconfigured → Inactive → Active → Finalized`
-
-```python
-from rclpy.lifecycle import Node as LifecycleNode, TransitionCallbackReturn
-
-class ManagedPerception(LifecycleNode):
-    def __init__(self):
-        super().__init__('managed_perception')
-        self.get_logger().info('Node created (unconfigured)')
-
-    def on_configure(self, state) -> TransitionCallbackReturn:
-        """Load params, allocate memory, set up pubs/subs (but don't activate)"""
-        self.declare_parameter('model_path', '')
-        model_path = self.get_parameter('model_path').value
-
-        try:
-            self.model = load_model(model_path)
-            self.det_pub = self.create_lifecycle_publisher(
-                DetectionArray, 'detections', 10)
-            self.get_logger().info(f'Configured with model: {model_path}')
-            return TransitionCallbackReturn.SUCCESS
-        except Exception as e:
-            self.get_logger().error(f'Configuration failed: {e}')
-            return TransitionCallbackReturn.FAILURE
-
-    def on_activate(self, state) -> TransitionCallbackReturn:
-        """Start processing — subscriptions go live here"""
-        self.image_sub = self.create_subscription(
-            Image, 'camera/image_raw', self.image_callback, 1)
-        self.get_logger().info('Activated — processing images')
-        return TransitionCallbackReturn.SUCCESS
-
-    def on_deactivate(self, state) -> TransitionCallbackReturn:
-        """Pause processing — safe to reconfigure after this"""
-        self.destroy_subscription(self.image_sub)
-        self.get_logger().info('Deactivated — stopped processing')
-        return TransitionCallbackReturn.SUCCESS
-
-    def on_cleanup(self, state) -> TransitionCallbackReturn:
-        """Release resources, return to unconfigured"""
-        del self.model
-        self.get_logger().info('Cleaned up')
-        return TransitionCallbackReturn.SUCCESS
-
-    def on_shutdown(self, state) -> TransitionCallbackReturn:
-        """Final cleanup before destruction"""
-        self.get_logger().info('Shutting down')
-        return TransitionCallbackReturn.SUCCESS
-
-    def on_error(self, state) -> TransitionCallbackReturn:
-        """Handle errors — try to recover or fail gracefully"""
-        self.get_logger().error(f'Error in state {state.label}')
-        return TransitionCallbackReturn.SUCCESS  # Transition to unconfigured
-```
-
-**Orchestrating Lifecycle Nodes** with a launch file:
-```python
-from launch import LaunchDescription
-from launch_ros.actions import LifecycleNode
-from launch_ros.event_handlers import OnStateTransition
-from launch.actions import EmitEvent, RegisterEventHandler
-from launch_ros.events.lifecycle import ChangeState
-from lifecycle_msgs.msg import Transition
-
-def generate_launch_description():
-    perception = LifecycleNode(
-        package='my_pkg', executable='managed_perception',
-        name='perception', output='screen',
-        parameters=[{'model_path': '/models/yolo.pt'}]
-    )
-
-    # Auto-configure on startup
-    configure_event = EmitEvent(event=ChangeState(
-        lifecycle_node_matcher=lambda node: node == perception,
-        transition_id=Transition.TRANSITION_CONFIGURE
-    ))
-
-    # Auto-activate after successful configure
-    activate_handler = RegisterEventHandler(OnStateTransition(
-        target_lifecycle_node=perception,
-        goal_state='inactive',
-        entities=[EmitEvent(event=ChangeState(
-            lifecycle_node_matcher=lambda node: node == perception,
-            transition_id=Transition.TRANSITION_ACTIVATE
-        ))]
-    ))
-
-    return LaunchDescription([
-        perception,
-        configure_event,
-        activate_handler,
-    ])
-```
-
-### 3. QoS (Quality of Service) — The #1 Source of ROS2 Bugs
-
-QoS mismatches are the most common reason topics silently fail to connect.
-
-**QoS Compatibility Matrix**:
 ```
 Publisher     Subscriber    Compatible?
 RELIABLE      RELIABLE      ✅ Yes
@@ -281,536 +134,295 @@ BEST_EFFORT   BEST_EFFORT   ✅ Yes
 BEST_EFFORT   RELIABLE      ❌ NO — SILENT FAILURE
 ```
 
-**Recommended QoS Profiles by Use Case**:
-```python
-from rclpy.qos import (
-    QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy,
-    QoSDurabilityPolicy, QoSPresetProfiles
-)
+**Debugging**: if a topic is listed but your callback never runs, compare the
+`Reliability` / `Durability` fields from `ros2 topic info /topic -v` on both sides.
 
-# Sensor data (cameras, lidars) — tolerate drops, want latest
-SENSOR_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.BEST_EFFORT,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=1,
-    durability=QoSDurabilityPolicy.VOLATILE
-)
+## Environment and discovery
 
-# Commands (velocity, joint) — never miss, small buffer
-COMMAND_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.RELIABLE,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=10,
-    durability=QoSDurabilityPolicy.VOLATILE
-)
+Use the course setup exactly. Do not change it:
 
-# Map / static data — reliable, and late joiners get it
-MAP_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.RELIABLE,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=1,
-    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL  # Replaces ROS1 latch
-)
-
-# Default parameter/state — reliable with some history
-STATE_QOS = QoSProfile(
-    reliability=QoSReliabilityPolicy.RELIABLE,
-    history=QoSHistoryPolicy.KEEP_LAST,
-    depth=10
-)
-```
-
-**Debugging QoS Issues**:
 ```bash
-# Check QoS info for a topic
-ros2 topic info /camera/image_raw -v
-# Look for "Reliability" and "Durability" fields
-
-# Check for incompatible QoS events
-ros2 run rqt_topic rqt_topic  # Shows sub counts and QoS
-
-# If 0 subscribers despite nodes running: QoS MISMATCH
+source /opt/ros/jazzy/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_DOMAIN_ID=8          # must match the robot
 ```
 
-### 4. Launch Files (Python-Based)
+- The laptop connects through the TurtleBot's Discovery Server (Computer Setup document,
+  step 9). The TurtleBot 4 supports Discovery Server only with Fast DDS, so do **not** switch to
+  CycloneDDS.
+- Do **not** set `ROS_LOCALHOST_ONLY` or `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`. The laptop
+  would stop seeing the robot.
+- When topics are missing, run `ros2 daemon stop; ros2 daemon start`.
 
-ROS2 launch files are Python, enabling powerful conditional logic:
+## Launch files
+
+Course style (Day 3 slides, see `day3pkg/launch/day3_launch.py`):
 
 ```python
+"""
+Launch the driver with its parameter file
+"""
+
 import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument, IncludeLaunchDescription,
-    GroupAction, OpaqueFunction, TimerAction
-)
-from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import (
-    LaunchConfiguration, PathJoinSubstitution,
-    PythonExpression
-)
-from launch_ros.actions import Node, ComposableNodeContainer, LoadComposableNode
-from launch_ros.descriptions import ComposableNode
-from launch_ros.substitutions import FindPackageShare
+from launch_ros.actions import Node
+
 
 def generate_launch_description():
-
-    # Arguments
-    robot_name_arg = DeclareLaunchArgument('robot_name', default_value='ur5')
-    sim_arg = DeclareLaunchArgument('sim', default_value='false')
-    use_composition_arg = DeclareLaunchArgument('use_composition', default_value='true')
-
-    robot_name = LaunchConfiguration('robot_name')
-    sim = LaunchConfiguration('sim')
-
-    # Load YAML params
-    config_file = PathJoinSubstitution([
-        FindPackageShare('my_pkg'), 'config', 'robot_params.yaml'
-    ])
-
-    # Standard node
-    perception_node = Node(
-        package='my_pkg',
-        executable='perception_node',
-        name='perception',
-        namespace=robot_name,
-        parameters=[config_file, {'use_sim_time': sim}],
-        remappings=[
-            ('camera/image_raw', 'realsense/color/image_raw'),
-            ('detections', 'perception/detections'),
-        ],
+    """
+    Called by 'ros2 launch' to get the nodes to start
+    """
+    params = os.path.join(get_package_share_directory('day3pkg'), 'config', 'driver.yaml')
+    ld = LaunchDescription()
+    ld.add_action(Node(
+        package='day3pkg',
+        executable='driver',
+        name='driving_node',
         output='screen',
-        condition=UnlessCondition(LaunchConfiguration('use_composition')),
-    )
-
-    # Composable nodes (zero-copy, same process)
-    composable_container = ComposableNodeContainer(
-        name='perception_container',
-        namespace=robot_name,
-        package='rclcpp_components',
-        executable='component_container_mt',  # Multi-threaded
-        composable_node_descriptions=[
-            ComposableNode(
-                package='my_pkg',
-                plugin='my_pkg::PerceptionComponent',
-                name='perception',
-                parameters=[config_file],
-                remappings=[
-                    ('camera/image_raw', 'realsense/color/image_raw'),
-                ],
-            ),
-            ComposableNode(
-                package='my_pkg',
-                plugin='my_pkg::TrackerComponent',
-                name='tracker',
-            ),
-        ],
-        condition=IfCondition(LaunchConfiguration('use_composition')),
-    )
-
-    # Delayed start for nodes that need others to initialize first
-    delayed_planner = TimerAction(
-        period=3.0,
-        actions=[
-            Node(package='my_pkg', executable='planner_node', name='planner')
-        ]
-    )
-
-    return LaunchDescription([
-        robot_name_arg, sim_arg, use_composition_arg,
-        perception_node,
-        composable_container,
-        delayed_planner,
-    ])
+        parameters=[params],          # or [{'linear_speed': 0.15}]
+    ))
+    return ld
 ```
 
-### 5. Components (ROS2's Answer to Nodelets)
+- Do not add a `namespace` to TurtleBot nodes. The robot's topics are not namespaced, so
+  `cmd_vel` would become `/<namespace>/cmd_vel` and the robot would not move.
+- Run it with `ros2 launch <package> <launch file>`. Install `launch/` (and `config/`) through
+  `setup.py` `data_files`.
 
-```cpp
-#include <rclcpp/rclcpp.hpp>
-#include <rclcpp_components/register_node_macro.hpp>
-#include <sensor_msgs/msg/image.hpp>
+## Actions
 
-namespace my_pkg {
-
-class PerceptionComponent : public rclcpp::Node {
-public:
-    explicit PerceptionComponent(const rclcpp::NodeOptions& options)
-        : Node("perception", options)
-    {
-        // Use intra-process communication for zero-copy
-        auto sub_options = rclcpp::SubscriptionOptions();
-        sub_options.use_intra_process_comm =
-            rclcpp::IntraProcessSetting::Enable;
-
-        sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "camera/image_raw",
-            rclcpp::SensorDataQoS(),
-            [this](sensor_msgs::msg::Image::UniquePtr msg) {
-                this->callback(std::move(msg));
-            },
-            sub_options);
-    }
-
-private:
-    void callback(sensor_msgs::msg::Image::UniquePtr msg) {
-        // UniquePtr = zero-copy when:
-        //   - publisher also uses UniquePtr
-        //   - both subscriber and publisher use intra-process
-        //   - this is the only subscriber
-        // msg is moved, not copied
-    }
-
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_;
-};
-
-}  // namespace my_pkg
-
-RCLCPP_COMPONENTS_REGISTER_NODE(my_pkg::PerceptionComponent)
-```
-
-### 6. Actions (ROS2 Style)
+To cancel an action while it runs, the server must be multithreaded (Day 3 slides): use a
+**synchronous** `execute_callback` in a `ReentrantCallbackGroup`, spun by a
+`MultiThreadedExecutor`. Stop the robot before reporting cancel.
 
 ```python
-from rclpy.action import ActionServer, CancelResponse, GoalResponse
-from my_interfaces.action import PickPlace
+import time
 
-class PickPlaceServer(Node):
+import rclpy
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+
+from day3_interfaces.action import Drive
+
+
+class DrivingNode(Node):
+    """
+    Serve the drive action
+    """
     def __init__(self):
-        super().__init__('pick_place_server')
-        self._action_server = ActionServer(
-            self, PickPlace, 'pick_place',
-            execute_callback=self.execute_cb,
-            goal_callback=self.goal_cb,
-            cancel_callback=self.cancel_cb,
+        super().__init__('driving_node')
+        self.action_server_ = ActionServer(
+            self, Drive, 'drive',
+            goal_callback=self.goal_callback,
+            cancel_callback=self.cancel_callback,
+            execute_callback=self.execute_callback,
+            callback_group=ReentrantCallbackGroup(),
         )
 
-    def goal_cb(self, goal_request):
-        """Decide whether to accept or reject the goal"""
-        self.get_logger().info(f'Received goal: {goal_request.target_pose}')
-        return GoalResponse.ACCEPT
+    def goal_callback(self, goal: Drive.Goal):
+        """
+        Reject invalid goals before execution starts
+        """
+        return GoalResponse.REJECT if goal.distance < 0.0 else GoalResponse.ACCEPT
 
-    def cancel_cb(self, goal_handle):
-        """Decide whether to accept cancel requests"""
-        self.get_logger().info('Cancel requested')
+    def cancel_callback(self, goal_handle):
+        """
+        Accept every cancel request
+        """
         return CancelResponse.ACCEPT
 
-    async def execute_cb(self, goal_handle):
-        """Execute the action (runs in an executor thread)"""
-        feedback_msg = PickPlace.Feedback()
-
-        for i, step in enumerate(self.plan(goal_handle.request)):
-            # Check cancellation
+    def execute_callback(self, goal_handle):
+        """
+        Long-running work; checks for cancel on every step
+        """
+        for _ in range(10):
             if goal_handle.is_cancel_requested:
+                # stop the robot here first
                 goal_handle.canceled()
-                return PickPlace.Result(success=False)
-
-            self.execute_step(step)
-            feedback_msg.progress = float(i) / len(self.steps)
-            goal_handle.publish_feedback(feedback_msg)
-
+                return Drive.Result()
+            time.sleep(0.1)       # one control step
         goal_handle.succeed()
-        return PickPlace.Result(success=True)
+        return Drive.Result()
+
+
+def main(args=None):
+    """
+    Spin with a MultiThreadedExecutor so cancel requests are handled during execution
+    """
+    rclpy.init(args=args)
+    node = DrivingNode()
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
 ```
 
-## DDS Configuration
-
-### Choosing a DDS Implementation
-```bash
-# Set DDS middleware (in ~/.bashrc or launch)
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp    # Recommended for most cases
-# export RMW_IMPLEMENTATION=rmw_fastrtps_cpp    # Default, good for multi-machine
-
-# Limit DDS discovery to local machine (reduces network noise)
-export ROS_LOCALHOST_ONLY=1
-
-# Use ROS_DOMAIN_ID to isolate robot groups on same network
-export ROS_DOMAIN_ID=42  # Range 0-101
-```
-
-### CycloneDDS Tuning (cyclonedds.xml)
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<CycloneDDS xmlns="https://cdds.io/config">
-  <Domain>
-    <General>
-      <NetworkInterfaceAddress>eth0</NetworkInterfaceAddress>
-      <AllowMulticast>false</AllowMulticast>  <!-- Unicast for reliability -->
-    </General>
-    <Internal>
-      <MaxMessageSize>65500</MaxMessageSize>
-      <SocketReceiveBufferSize>10MB</SocketReceiveBufferSize>
-    </Internal>
-    <!-- For large data (images, point clouds) -->
-    <Sizing>
-      <ReceiveBufferSize>10MB</ReceiveBufferSize>
-    </Sizing>
-  </Domain>
-</CycloneDDS>
-```
-
-```bash
-export CYCLONEDDS_URI=file:///path/to/cyclonedds.xml
-```
+The action client patterns are in the `turtlebot4` skill
+(`references/ros2-python-patterns.md`).
 
 ## Build System
 
-### Workspace Setup and colcon
+### Workspace and colcon
 
 ```bash
-# Create a ROS2 workspace
-mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws
-
-# Clone packages into src/
-cd src
-git clone https://github.com/org/my_robot_pkg.git
-cd ..
-
-# Install dependencies declared in package.xml files
-sudo apt update
-rosdep update
-rosdep install --from-paths src --ignore-src -y
-
-# Build the workspace
-source /opt/ros/humble/setup.bash   # Source the ROS2 underlay FIRST
-colcon build
-
-# Source the workspace overlay
+mkdir -p robotics_ws/src     # once: a workspace is a folder with src/
+cd robotics_ws
+colcon build                 # creates build/ install/ log/
 source install/setup.bash
 ```
 
-**Essential colcon flags**:
+- `~/.bashrc` should contain `source /opt/ros/jazzy/setup.bash`, with the workspace's
+  `install/setup.bash` below it.
+- **After every change** (including editing a Python file): `colcon build`, then
+  `source install/setup.bash`.
+- Never source `setup.bash` from `build/`. Always use `install/`.
+
+**Useful colcon flags**:
+
 ```bash
-# Build only specific packages (faster iteration)
-colcon build --packages-select my_pkg
-
-# Build a package and all its dependencies
-colcon build --packages-up-to my_pkg
-
-# Symlink Python files instead of copying (edit without rebuild)
-colcon build --symlink-install
-
-# Parallel jobs (default = nproc, lower if running out of RAM)
-colcon build --parallel-workers 4
-
-# Pass CMake args to all packages
-colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
-
-# Clean build (remove build/ install/ log/ and rebuild)
-rm -rf build/ install/ log/
-colcon build
-
-# Build with compiler warnings as errors (CI)
-colcon build --cmake-args -DCMAKE_CXX_FLAGS="-Wall -Werror"
-
-# Show build output in real-time (useful for debugging build failures)
-colcon build --event-handlers console_direct+
+colcon build --packages-select my_pkg              # build only these packages
+colcon build --packages-select day3_interfaces day3pkg   # interfaces first
+colcon build --packages-up-to my_pkg               # a package and everything it depends on
+colcon build --event-handlers console_direct+      # show build output live
+rm -rf build/ install/ log/ && colcon build        # clean build
+colcon test --packages-select my_pkg && colcon test-result --verbose
 ```
 
-### Build Types: ament_cmake vs ament_python
+This workspace is built **without** `--symlink-install`. Do not add it: switching an existing
+workspace to symlinks fails until `build/` and `install/` are deleted, and the course workflow
+is to rebuild after each edit.
 
-Choose based on your package language:
+### Creating packages (Day 2 slides)
+
+```bash
+cd robotics_ws/src
+# Python node package
+ros2 pkg create my_pkg --build-type ament_python --dependencies rclpy --license Apache-2.0
+# interfaces package (ament_cmake is the default), then make it interfaces-only
+ros2 pkg create my_interfaces
+cd my_interfaces && rm -r src include && mkdir msg srv action
+```
+
+Note that the Python sources end up in `src/my_pkg/my_pkg/` (the package name twice).
+
+### Build types
 
 ```
-ament_cmake     — C++ packages, mixed C++/Python packages, packages with custom msgs
-ament_python    — Pure Python packages (no C++, no custom messages)
+ament_python    — Python node packages (no custom messages)
+ament_cmake     — interfaces packages (msg/, srv/, action/)
 ```
 
-### package.xml — Declaring Dependencies
+### package.xml — Python node package
 
 ```xml
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd"
-            schematypens="http://www.w3.org/2001/XMLSchema"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>my_robot_pkg</name>
-  <version>0.1.0</version>
-  <description>My robot perception package</description>
-  <maintainer email="dev@example.com">Dev Name</maintainer>
+  <name>my_pkg</name>
+  <version>0.0.0</version>
+  <description>What the package does</description>
+  <maintainer email="robo@todo.todo">robo</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- Build tool — determines build type -->
-  <buildtool_depend>ament_cmake</buildtool_depend>
-  <!-- For pure Python: <buildtool_depend>ament_python</buildtool_depend> -->
-
-  <!-- Build-time dependencies (headers, CMake modules) -->
-  <build_depend>rclcpp</build_depend>
-  <build_depend>sensor_msgs</build_depend>
-  <build_depend>OpenCV</build_depend>
-
-  <!-- Runtime dependencies -->
-  <exec_depend>rclcpp</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>rclpy</exec_depend>
-
-  <!-- Shortcut: depend = build_depend + exec_depend -->
-  <depend>rclcpp</depend>
-  <depend>sensor_msgs</depend>
+  <!-- every package whose messages, services or actions you import -->
+  <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
-  <depend>tf2_ros</depend>
-  <depend>cv_bridge</depend>
+  <depend>nav_msgs</depend>
+  <depend>my_interfaces</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
-  <!-- For custom message generation -->
-  <build_depend>rosidl_default_generators</build_depend>
-  <exec_depend>rosidl_default_runtime</exec_depend>
-  <member_of_group>rosidl_interface_packages</member_of_group>
-
-  <!-- Test dependencies -->
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_cmake_pytest</test_depend>
-  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
-    <build_type>ament_cmake</build_type>
+    <build_type>ament_python</build_type>
   </export>
 </package>
 ```
 
-### CMakeLists.txt — ament_cmake Package
+List each dependency **once**. `<depend>` already covers build and exec, and colcon rejects a
+`package.xml` that repeats the same package in `<depend>` and `<build_depend>`/`<exec_depend>`.
+The build type comes from `<export><build_type>`.
+
+### package.xml and CMakeLists.txt — interfaces package (Day 2 slides)
+
+`package.xml`, after `<buildtool_depend>ament_cmake</buildtool_depend>`:
+
+```xml
+<build_depend>rosidl_default_generators</build_depend>
+<depend>action_msgs</depend>                <!-- only if the package has .action files -->
+<exec_depend>rosidl_default_runtime</exec_depend>
+<member_of_group>rosidl_interface_packages</member_of_group>
+```
+
+`CMakeLists.txt`, after `find_package(ament_cmake REQUIRED)` and before `ament_package()`:
 
 ```cmake
-cmake_minimum_required(VERSION 3.8)
-project(my_robot_pkg)
-
-# Default to C++17
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# ── Find dependencies ──────────────────────────────────────────
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclcpp_components REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(cv_bridge REQUIRED)
-find_package(OpenCV REQUIRED)
-
-# ── Custom messages / services / actions ───────────────────────
 find_package(rosidl_default_generators REQUIRED)
-
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Detection.msg"
   "srv/GetPose.srv"
-  "action/PickPlace.action"
-  DEPENDENCIES geometry_msgs sensor_msgs
+  "action/MoveForward.action"
+  DEPENDENCIES geometry_msgs     # needed when fields use another package's types
 )
-
-# ── Standalone executable node ─────────────────────────────────
-add_executable(perception_node src/perception_node.cpp)
-ament_target_dependencies(perception_node
-  rclcpp sensor_msgs cv_bridge OpenCV tf2_ros
-)
-install(TARGETS perception_node
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-# ── Component (composable node) ────────────────────────────────
-add_library(perception_component SHARED
-  src/perception_component.cpp
-)
-ament_target_dependencies(perception_component
-  rclcpp rclcpp_components sensor_msgs cv_bridge OpenCV
-)
-# Register as a composable node
-rclcpp_components_register_node(perception_component
-  PLUGIN "my_robot_pkg::PerceptionComponent"
-  EXECUTABLE perception_component_node
-)
-install(TARGETS perception_component
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
-
-# ── Install Python nodes ───────────────────────────────────────
-install(PROGRAMS
-  scripts/planning_node.py
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-# ── Install launch, config, rviz, urdf ─────────────────────────
-install(DIRECTORY
-  launch config rviz urdf
-  DESTINATION share/${PROJECT_NAME}
-)
-
-# ── Install headers ────────────────────────────────────────────
-install(DIRECTORY include/
-  DESTINATION include
-)
-
-# ── Tests ──────────────────────────────────────────────────────
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
-
-  find_package(ament_cmake_pytest REQUIRED)
-  ament_add_pytest_test(test_perception test/test_perception.py)
-
-  find_package(launch_testing_ament_cmake REQUIRED)
-  add_launch_test(test/test_integration.py)
-endif()
-
-ament_package()
+ament_export_dependencies(rosidl_default_runtime)
 ```
 
-### setup.py / setup.cfg — Pure Python Package
+If you use `DEPENDENCIES geometry_msgs`, also add `find_package(geometry_msgs REQUIRED)` and
+`<depend>geometry_msgs</depend>`.
+
+### setup.py — Python package
 
 ```python
-# setup.py (for ament_python packages)
+from glob import glob
+import os
+
 from setuptools import find_packages, setup
 
-package_name = 'my_python_pkg'
+package_name = 'my_pkg'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
-        # Register with ament index
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
-        # Package manifest
+        ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        # Launch files
-        ('share/' + package_name + '/launch',
-            ['launch/robot.launch.py']),
-        # Config files
-        ('share/' + package_name + '/config',
-            ['config/params.yaml']),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Dev Name',
-    maintainer_email='dev@example.com',
-    description='My Python robot package',
+    maintainer='robo',
+    maintainer_email='robo@todo.todo',
+    description='What the package does',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            # format: 'executable_name = package.module:function'
-            'perception_node = my_python_pkg.perception_node:main',
-            'planner_node = my_python_pkg.planner_node:main',
+            # executable = package.module:function   (no .py on the module)
+            'my_node = my_pkg.my_node:main',
         ],
     },
 )
 ```
 
-```cfg
-# setup.cfg
-[develop]
-script_dir=$base/lib/my_python_pkg
+`setup.cfg` is generated by `ros2 pkg create`. Leave it as is.
 
-[install]
-install_scripts=$base/lib/my_python_pkg
-```
+### Custom message, service, and action definitions
 
-### Custom Message, Service, and Action Definitions
+Names are UpperCamelCase. Each file contains only `type name` lines (Day 2–3 slides):
 
 ```
 # msg/Detection.msg
@@ -818,177 +430,107 @@ std_msgs/Header header
 string class_name
 float32 confidence
 geometry_msgs/Pose pose
-float32[4] bbox    # [x_min, y_min, x_max, y_max]
 ```
 
 ```
-# srv/GetPose.srv
+# srv/GetPose.srv  — request, ---, response
 string object_name
 ---
 bool success
 geometry_msgs/PoseStamped pose
-string error_message
 ```
 
 ```
-# action/PickPlace.action
-# Goal
-geometry_msgs/Pose target_pose
-string object_class
+# action/MoveForward.action  — goal, ---, result, ---, feedback
+float64 distance   # meters
 ---
-# Result
 bool success
-string error_message
 ---
-# Feedback
-float32 progress
-string current_phase
+float64 remaining  # meters
 ```
 
-### Workspace Overlays
+Python types: `bool`→bool, `int32`→int, `float64`→float, `string`→str, `type[]`→list. Assign
+`float()` values to float fields, because a Python `int` is rejected.
 
-```
-Underlay (base ROS2)         /opt/ros/humble/
-    ↑
-Overlay 1 (shared libs)     ~/ros2_ws/install/
-    ↑
-Overlay 2 (your dev pkg)    ~/dev_ws/install/
-
-Source order matters — LAST sourced overlay wins for duplicate packages.
-```
+### Build troubleshooting
 
 ```bash
-# Correct source order
-source /opt/ros/humble/setup.bash    # Base
-source ~/ros2_ws/install/setup.bash  # Shared workspace
-source ~/dev_ws/install/setup.bash   # Your development overlay
-
-# NEVER source setup.bash from build/ — always use install/
-```
-
-### Build Troubleshooting
-
-```bash
-# "Package not found" during build
-# → Missing dependency. Check package.xml and run:
-rosdep install --from-paths src --ignore-src -y
-
 # "Could not find a package configuration file provided by X"
-# → CMake can't find the package. Did you source the underlay?
-source /opt/ros/humble/setup.bash
+# -> the underlay is not sourced
+source /opt/ros/jazzy/setup.bash
 
-# Build succeeds but node can't be found at runtime
-# → Forgot to source the overlay, or entry_points misconfigured
+# Build succeeds but 'ros2 run' cannot find the package or executable
+# -> overlay not sourced, or the console_scripts entry is wrong
 source install/setup.bash
-ros2 pkg list | grep my_pkg      # Should appear
-ros2 pkg executables my_pkg      # List available executables
+ros2 pkg list | grep my_pkg
+ros2 pkg executables my_pkg
 
-# Python changes not reflected after rebuild
-# → Use --symlink-install, or clean and rebuild
-colcon build --packages-select my_pkg --symlink-install
-
-# "Multiple packages with the same name"
-# → Duplicate package in workspace. Check with:
-colcon list --packages-select my_pkg
-
-# Build runs out of memory (large C++ packages)
-colcon build --parallel-workers 2 --executor sequential
+# Python changes not reflected
+# -> rebuild that package and re-source
+colcon build --packages-select my_pkg && source install/setup.bash
 
 # Custom messages not found by Python nodes
-# → Missing rosidl_default_runtime in package.xml exec_depend
-# → Or forgot to source install/setup.bash after building msgs
+# -> build the interfaces package first, re-source, and check <depend>my_interfaces</depend>
+ros2 interface show my_interfaces/msg/MyMessage
+
+# "Multiple packages with the same name"
+colcon list | grep my_pkg
+
+# package.xml rejected ("dependency ... is redundant")
+# -> the same package is listed in <depend> and in <build_depend>/<exec_depend>
 ```
 
-## Package Structure (ROS2)
+## Package structure
 
 ```
-my_robot_pkg/
-├── CMakeLists.txt              # Or setup.py for pure Python
-├── package.xml
-├── my_robot_pkg/               # Python module (same name as package)
-│   ├── __init__.py
-│   ├── perception_node.py
-│   └── utils/
-│       └── transforms.py
-├── src/                        # C++ source
-│   └── perception_component.cpp
-├── include/my_robot_pkg/       # C++ headers
-│   └── perception_component.hpp
-├── config/
-│   ├── robot_params.yaml
-│   └── cyclonedds.xml
-├── launch/
-│   ├── robot.launch.py
-│   └── perception.launch.py
-├── msg/
-│   └── Detection.msg
-├── srv/
-│   └── GetPose.srv
-├── action/
-│   └── PickPlace.action
-├── rviz/
-│   └── robot.rviz
-├── urdf/
-│   └── robot.urdf.xacro
-└── test/
-    ├── test_perception.py      # pytest
-    └── test_integration.py     # launch_testing
+robotics_ws/                      # the one workspace (also the git repo folder)
+└── src/
+    ├── my_pkg/                   # ament_python node package
+    │   ├── package.xml
+    │   ├── setup.py
+    │   ├── setup.cfg
+    │   ├── resource/my_pkg
+    │   ├── my_pkg/               # Python module (package name again)
+    │   │   ├── __init__.py
+    │   │   └── my_node.py
+    │   ├── launch/my_launch.py
+    │   ├── config/my_node.yaml
+    │   └── test/                 # generated lint tests
+    └── my_interfaces/            # ament_cmake interfaces package
+        ├── package.xml
+        ├── CMakeLists.txt
+        ├── msg/  srv/  action/
 ```
 
-## Debugging Toolkit
+## Debugging toolkit
 
 ```bash
-# Topic inspection
-ros2 topic list
-ros2 topic info /camera/image_raw -v  # Shows QoS details
-ros2 topic hz /camera/image_raw
-ros2 topic bw /camera/image_raw
-ros2 topic echo /joint_states --once
+# static (what was built)
+ros2 interface list
+ros2 interface show day3_interfaces/action/Drive
 
-# Node inspection
+# dynamic (what is running now)
 ros2 node list
-ros2 node info /perception
+ros2 node info /driving_node
+ros2 topic list -t
+ros2 topic info /odom -v               # QoS details
+ros2 topic hz /odom
+ros2 topic echo /cmd_vel
+ros2 topic echo /odom --once
+ros2 service list -t
+ros2 action list -t
+ros2 action info /drive
 
-# Parameter management
-ros2 param list /perception
-ros2 param get /perception confidence_threshold
-ros2 param set /perception confidence_threshold 0.8  # Runtime change!
+# parameters
+ros2 param list /driving_node
+ros2 param get /driving_node linear_speed
+ros2 param dump /driving_node
 
-# Lifecycle management
-ros2 lifecycle list /managed_perception
-ros2 lifecycle set /managed_perception configure
-ros2 lifecycle set /managed_perception activate
+# recording
+ros2 bag record /odom /cmd_vel
+ros2 bag info <bag folder>
 
-# Service calls
-ros2 service list
-ros2 service call /get_pose my_interfaces/srv/GetPose "{}"
-
-# Action monitoring
-ros2 action list
-ros2 action info /pick_place
-ros2 action send_goal /pick_place my_interfaces/action/PickPlace "{target_pose: {x: 1.0}}"
-
-# Bag recording (ROS2 style)
-ros2 bag record -a                              # All topics
-ros2 bag record /camera/image /tf               # Specific topics
-ros2 bag record -s mcap /camera/image           # MCAP format (recommended)
-ros2 bag info recording/                        # Inspect
-ros2 bag play recording/ --clock                # Playback
-
-# DDS debugging
-ros2 doctor                                     # System diagnostics
-ros2 daemon stop && ros2 daemon start           # Reset discovery daemon
+# discovery
+ros2 doctor
+ros2 daemon stop; ros2 daemon start
 ```
-
-## Production Deployment Checklist
-
-1. **Use lifecycle nodes** for all critical components
-2. **Set `ROS_LOCALHOST_ONLY=1`** if not communicating across machines
-3. **Pin your DDS implementation** (CycloneDDS recommended)
-4. **Configure QoS explicitly** — never rely on defaults for production
-5. **Set `ROS_DOMAIN_ID`** to isolate your robot from others on the network
-6. **Enable ROS2 security** (SROS2) for authenticated communication
-7. **Use composition** for nodes that exchange large data
-8. **Record bags in MCAP format** — better tooling, random access, compression
-9. **Set up launch-testing** for integration tests
-10. **Use `ros2 doctor`** as part of your health check pipeline

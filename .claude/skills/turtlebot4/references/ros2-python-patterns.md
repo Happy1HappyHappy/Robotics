@@ -126,8 +126,10 @@ def odom_callback(self, msg: Odometry):
     self.latest_odom_ = msg
 ```
 
-A best-effort subscription (`qos_profile_sensor_data`) works with both best-effort and
-reliable publishers. Keep callbacks short: store or compute and return.
+The course default queue depth is 10 (`create_subscription(Type, 'topic', callback, 10)`).
+For the robot's sensor topics, this repo uses `qos_profile_sensor_data`, a best-effort profile
+that works with both best-effort and reliable publishers. Keep callbacks short: store or
+compute and return.
 
 ## Timer
 
@@ -298,14 +300,17 @@ ros2 pkg create my_interfaces            # ament_cmake by default
 cd my_interfaces && rm -r src include && mkdir msg srv action
 ```
 
-`package.xml`, after `<buildtool_depend>ament_cmake</buildtool_depend>`:
+`package.xml`, after `<buildtool_depend>ament_cmake</buildtool_depend>` (Day 2 slides):
 
 ```xml
-<buildtool_depend>rosidl_default_generators</buildtool_depend>
+<build_depend>rosidl_default_generators</build_depend>
 <depend>action_msgs</depend>                    <!-- only needed for .action files -->
 <exec_depend>rosidl_default_runtime</exec_depend>
 <member_of_group>rosidl_interface_packages</member_of_group>
 ```
+
+The repo's `day3_interfaces` uses `<buildtool_depend>rosidl_default_generators</buildtool_depend>`
+instead, which also works.
 
 `CMakeLists.txt`, before `ament_package()`:
 
@@ -316,6 +321,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MyService.srv"
   "action/MyAction.action"
 )
+ament_export_dependencies(rosidl_default_runtime)
 ```
 
 Field types: `bool`, `int32`, `float64` (Python `float`), `string`, `type[]` (list), or another
