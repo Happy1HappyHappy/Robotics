@@ -42,8 +42,7 @@ To build one package only: `colcon build --packages-select <pkg>`.
 ```bash
 ros2 run day2pkg node1            # Project 2
 ros2 launch day3pkg day3_launch.py   # Projects 3, 4 and 5
-ros2 run day3pkg mapper              # Project 6 (live)
-ros2 run day3pkg offline_grid scan.yaml   # Project 6 (one saved scan)
+ros2 run day3pkg mapper              # Project 6
 ```
 
 For Project 5 (odometry), see the
@@ -56,5 +55,4 @@ Project 6, the
 - Check that the robot is reachable: `ros2 topic echo /ip`
 - Check the velocity commands being sent: `ros2 topic echo /cmd_vel`
 - Read one odometry message: `ros2 topic echo /odom --once`
-- Save one full LiDAR scan: `ros2 topic echo /scan --once --full-length > scan.yaml`
 - Topics not showing up: `ros2 daemon stop; ros2 daemon start`

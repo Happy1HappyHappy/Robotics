@@ -30,7 +30,6 @@ setup(
             'driver = day3pkg.driver:main',
             'executive = day3pkg.executive:main',
             'mapper = day3pkg.mapper:main',
-            'offline_grid = day3pkg.offline:main',
         ],
     },
 )

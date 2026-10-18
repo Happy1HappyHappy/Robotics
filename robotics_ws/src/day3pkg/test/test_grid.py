@@ -1,5 +1,5 @@
 """
-Offline tests of the occupancy grid (no ROS, no robot): python3 -m pytest test/test_grid.py
+Tests of the occupancy grid (no ROS, no robot): python3 -m pytest test/test_grid.py
 """
 
 import math
@@ -7,7 +7,6 @@ import math
 import pytest
 
 from day3pkg.grid import bresenham, log_odds, OccupancyGrid
-from day3pkg.offline import load_scan
 
 
 @pytest.mark.parametrize('end', [(5, 2), (2, 5), (-5, 2), (2, -5), (-3, -3), (0, 4), (4, 0)])
@@ -78,22 +77,3 @@ def test_log_odds_are_clamped():
     assert g.log_odds.max() == pytest.approx(2.0)
     assert g.log_odds.min() == pytest.approx(-2.0)
     assert g.probability().max() == pytest.approx(1.0 - 1.0 / 101.0)
-
-
-def test_load_scan_reads_echo_output(tmp_path):
-    f = tmp_path / 'scan.yaml'
-    f.write_text('header:\n  stamp:\n    sec: 1\n    nanosec: 2\n  frame_id: rplidar_link\n'
-                 'angle_min: -3.14\nangle_max: 3.14\nangle_increment: 0.01\n'
-                 'time_increment: 0.0\nscan_time: 0.1\nrange_min: 0.15\nrange_max: 12.0\n'
-                 'ranges:\n- 1.5\n- .inf\n- .nan\nintensities:\n- 47.0\n- 0.0\n- 0.0\n---\n')
-    scan = load_scan(str(f))
-    assert scan['ranges'][0] == 1.5
-    assert math.isinf(scan['ranges'][1]) and math.isnan(scan['ranges'][2])
-    assert scan['header']['frame_id'] == 'rplidar_link'
-
-
-def test_load_scan_rejects_truncated_ranges(tmp_path):
-    f = tmp_path / 'scan.yaml'
-    f.write_text("angle_min: 0.0\nranges:\n- 1.5\n- '...'\n---\n")
-    with pytest.raises(ValueError, match='full-length'):
-        load_scan(str(f))

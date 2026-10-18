@@ -167,9 +167,8 @@ ros2 action send_goal /drive_distance irobot_create_msgs/action/DriveDistance "{
 
 The **Grid Node** (`mapper.py`) builds an occupancy grid from the TurtleBot's LiDAR. It
 reads `/scan`, places each scan using `/odom` and the LiDAR's mounting on the robot
-(from TF), and draws and saves the grid as an image. `offline_grid` (`offline.py`)
-builds the same grid from one saved scan, without the robot. The grid itself is in
-`grid.py` and the drawing in `render.py`.
+(from TF), and draws and saves the grid as an image. The grid itself is in `grid.py`
+and the drawing in `render.py`.
 
 ```
  /scan       LaserScan ──┐
@@ -210,8 +209,8 @@ the robot's **left**, not forward. If you ignore this, the map is rotated by 90�
 Task 2 the walls smear as the robot drives, because the motion (forward) and the scan
 no longer agree.
 
-The Grid Node reads the mounting from TF, and `offline_grid` assumes 90° by default.
-Check it on your robot (needs the robot connected):
+The Grid Node reads the mounting from TF. Check it on your robot (needs the robot
+connected):
 
 ```bash
 ros2 run tf2_ros tf2_echo base_link rplidar_link
@@ -223,46 +222,14 @@ instead.
 
 ### Dependencies
 
-The Grid Node and `offline_grid` need NumPy, OpenCV and PyYAML (`python3-numpy`,
-`python3-opencv`, `python3-yaml`), which come with a ROS 2 desktop install. Build as
-in [Build and run](#build-and-run).
+The Grid Node needs NumPy and OpenCV (`python3-numpy`, `python3-opencv`), which come
+with a ROS 2 desktop install. Build as in [Build and run](#build-and-run).
 
 ### Task 1: occupancy grid from one scan
 
-#### Offline (without the robot)
-
-While connected to the robot, save one scan to a file:
-
-```bash
-ros2 topic echo /scan --once --full-length > scan.yaml
-```
-
-- On Jazzy, `ros2 topic echo` has no `-n 1`; use `--once`.
-- **`--full-length` is required.** Without it, `ros2 topic echo` cuts every array off
-  after 128 entries and writes `'...'`, so most of the scan would be lost.
-  `offline_grid` refuses a file like that and tells you to capture it again.
-
-Then, anywhere (no robot needed):
-
-```bash
-ros2 run day3pkg offline_grid scan.yaml
-```
-
-It prints how many rays it used, saves `grid_offline.png`, and shows the grid in a
-window (press any key in the window to close it). The sensor is at the origin and the
-robot faces up.
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `--mount-yaw` | `90` | LiDAR yaw on the robot, degrees. `0` draws the scan in the LiDAR's own frame |
-| `--output` | `grid_offline.png` | Image file to save (`''` = do not save) |
-| `--no-show` | off | Only save the image, do not open a window |
-| `--size`, `--resolution`, `--scale` | `200`, `0.05`, `3` | Cells per side, cell side in m, image pixels per cell |
-
-#### Live
-
-With the robot standing still, run the Grid Node (see Task 2). Its first update is
-Task 1: one scan with the sensor at the origin, saved as `grid_0.00m.png`.
+Start the Grid Node with the robot standing still (step 2 of Task 2). Its first update
+is Task 1: one scan with the sensor at the origin, shown in the window and saved as
+`grid_0.00m.png`.
 
 ### Task 2: drive 1 m and update every 0.1 m
 
@@ -343,7 +310,7 @@ Set with `--ros-args -p name:=value`, e.g.
 
 ### Testing without the robot
 
-- Unit tests of the grid and the scan file reader, from this package's directory
+- Unit tests of the grid, from this package's directory
   (`robotics_ws/src/day3pkg`):
 
   ```bash
@@ -354,7 +321,7 @@ Set with `--ros-args -p name:=value`, e.g.
 
   ```bash
   ros2 bag record /scan /odom /tf /tf_static     # on the robot's network, while driving
-  ros2 bag play <bag folder>                     # later, offline, with the Grid Node running
+  ros2 bag play <bag folder>                     # later, with the Grid Node running
   ```
 
   If the replay does not deliver the LiDAR transform, add `-p use_tf:=false`.
