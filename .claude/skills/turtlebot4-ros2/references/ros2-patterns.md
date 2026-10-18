@@ -1,9 +1,10 @@
 # ROS 2 Python patterns (CS 5335, Days 2–4)
 
 These are **patterns, not facts**. They were written for ROS 2 Jazzy in Fall 2026, and APIs,
-message types and topic names can change. Before using one, check it against the installed
-system, then build and run (constitution, Article II). Start from the simplest pattern that
-does the job (Article III).
+message types and topic names can change. Before using a pattern, verify that its API, message
+types, topic names, QoS settings, and frame conventions match the installed ROS distribution and
+robot, then build and run it. Do not claim code is verified unless it has actually been built or
+tested. Start from the simplest pattern that does the job.
 
 They are the course's slide patterns, rewritten as valid `rclpy` code in this repo's style. The
 slides are pseudocode. When copying from them, fix these known errors:
@@ -27,6 +28,7 @@ slides are pseudocode. When copying from them, fix these known errors:
 - [Timer](#timer)
 - [Services](#services)
 - [Actions](#actions)
+- [Stopping on every exit path](#stopping-on-every-exit-path)
 - [Defining interfaces](#defining-interfaces)
 - [Parameters](#parameters)
 - [Launch files](#launch-files)
@@ -203,7 +205,7 @@ The repo's `Drive.action` is an example.
 
 **Server, with cancel**: the execute loop has to keep running while a cancel request
 arrives, so the server needs a `MultiThreadedExecutor`. This is the one case where the extra
-complexity is justified (Article III). An action that never needs to be canceled or interrupted
+complexity is justified. An action that never needs to be canceled or interrupted
 can use the plain single-threaded `rclpy.spin(node)`.
 
 ```python
@@ -299,6 +301,82 @@ def cancel_done_callback(self, future):
 
 The synchronous version (`spin_until_future_complete` on the goal and result futures) is what
 `executive.py` uses for its blocking command loop.
+
+## Stopping on every exit path
+
+The stop command must not live only on the normal path. Cover completion, cancel, exceptions,
+timeouts and shutdown.
+
+**Exceptions and cancel inside a motion loop**: put the stop in `finally`, so it runs however
+the loop exits.
+
+```python
+def execute_callback(self, goal_handle):
+    """
+    Drive until done; the robot is stopped on success, cancel, timeout or any exception
+    """
+    start = self.get_clock().now()
+    max_duration = self.get_parameter('max_goal_time').value     # s
+    try:
+        while not self.goal_reached():
+            if goal_handle.is_cancel_requested:
+                self.publish_cmd(0.0, 0.0)  # stop before reporting
+                goal_handle.canceled()
+                return Drive.Result()
+            elapsed = (self.get_clock().now() - start).nanoseconds / 1e9
+            if elapsed > max_duration:
+                self.get_logger().error(f'Goal timed out after {elapsed:.1f} s')
+                self.publish_cmd(0.0, 0.0)
+                goal_handle.abort()
+                return Drive.Result()
+            self.publish_cmd(self.linear_, self.angular_)
+            time.sleep(self.period_)
+        goal_handle.succeed()
+        return Drive.Result()
+    finally:
+        self.publish_cmd(0.0, 0.0)      # runs on every exit path, including exceptions
+```
+
+**Stale data**: a watchdog timer stops the robot when the data it depends on stops arriving.
+
+```python
+# in __init__
+self.declare_parameter('odom_timeout', 0.5)     # s
+self.last_odom_time_ = None
+self.watchdog_ = self.create_timer(0.1, self.watchdog_callback)
+
+def odom_callback(self, msg):
+    self.latest_odom_ = msg
+    self.last_odom_time_ = self.get_clock().now()
+
+def watchdog_callback(self):
+    """
+    Stop and warn if odometry is older than odom_timeout while we are driving
+    """
+    if not self.driving_ or self.last_odom_time_ is None:
+        return
+    age = (self.get_clock().now() - self.last_odom_time_).nanoseconds / 1e9
+    if age > self.get_parameter('odom_timeout').value:
+        self.publish_cmd(0.0, 0.0)
+        self.get_logger().warn(f'Odometry is {age:.2f} s old, stopping',
+                               throttle_duration_sec=1.0)
+```
+
+**Shutdown**: stop in `main()`'s `finally` as well. This covers Ctrl-C and launch shutdown:
+
+```python
+try:
+    executor.spin()
+except KeyboardInterrupt:
+    pass
+finally:
+    node.publish_cmd(0.0, 0.0)
+    node.destroy_node()
+    rclpy.try_shutdown()
+```
+
+These software stops are an extra layer, not a replacement for the robot's own protections
+(cliff detection, command timeout, e-stop).
 
 ## Defining interfaces
 
