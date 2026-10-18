@@ -102,7 +102,7 @@ Driving interfaces, from low to high level. Use the highest level the assignment
 
 | Level | Interface | Notes |
 | --- | --- | --- |
-| Low | `/cmd_vel` (TwistStamped) | Your own control loop. Per the Day 5 slides, later projects move to the higher levels |
+| Low | `/cmd_vel` (TwistStamped) | Your own control loop. Day 5 slides: "This week's assignment is the last time you need to use /cmd_vel. You get to start using higher-level driving interfaces in Project 5!" |
 | Medium | `/drive_distance`, `/rotate_angle`, `/drive_arc` | Create 3 actions that close the loop on odometry |
 | High | `/navigate_to_position`, `/dock`, `/undock`, `/wall_follow`, Nav2 | Goal fields are in the interfaces reference |
 

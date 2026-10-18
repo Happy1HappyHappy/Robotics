@@ -439,9 +439,21 @@ except TransformException as ex:
     self.get_logger().warn(f'No transform odom -> base_link: {ex}')
 ```
 
-For 2D work, use a small `yaw_from_quaternion()` helper like the one in `driver.py`. The
-slides' `tf_transformations` (`quaternion_from_euler`, `euler_from_quaternion`) needs an extra
-package (`ros-jazzy-tf-transformations`), so check that it is installed before depending on it.
+Converting quaternions is the course's (Day 4) `tf_transformations`. It stores quaternions as
+`(qx, qy, qz, qw)`:
+
+```python
+from tf_transformations import euler_from_quaternion, quaternion_from_euler
+
+q = t.transform.rotation
+roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+qx, qy, qz, qw = quaternion_from_euler(0.0, 0.0, yaw)
+```
+
+If `python3 -c "import tf_transformations"` fails, install it
+(`sudo apt install ros-jazzy-tf-transformations`) and add
+`<depend>tf_transformations</depend>` to `package.xml`. The existing `driver.py` uses its own
+`yaw_from_quaternion()` helper for 2D, which gives the same yaw with no extra package.
 To inspect the frame tree: `ros2 run tf2_tools view_frames`.
 
 ## Multithreading and executors

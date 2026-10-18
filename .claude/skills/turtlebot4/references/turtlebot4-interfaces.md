@@ -103,7 +103,9 @@ ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"
 ```
 
 From Python, use an `ActionClient` with these types (see the patterns reference) and add
-`<depend>irobot_create_msgs</depend>` to `package.xml`. `navigate_to_position` rotates, drives
+`<depend>irobot_create_msgs</depend>` to `package.xml`. The slides' "Navigate To Pose" is the
+Create 3's `/navigate_to_position` (`NavigateToPosition`). `NavigateToPose` is a different
+action, from Nav2. `navigate_to_position` rotates, drives
 straight, then optionally rotates. It is not a path planner, so use Nav2 for obstacle-aware
 navigation.
 

@@ -24,6 +24,9 @@ description: >
 - **One** workspace, `robotics_ws/`, which is also the git repository.
 - Python nodes live in `ament_python` packages. Messages, services and actions live in a
   separate `ament_cmake` interfaces package.
+- Velocity commands on `/cmd_vel` are `geometry_msgs/msg/TwistStamped` on the course's
+  TurtleBot 4, **not** `Twist`. Most online examples use `Twist`, and the robot ignores it. The
+  `turtlebot4` skill has the robot-specific topics, actions and rules.
 - Not part of the course, so do not introduce them: lifecycle (managed) nodes, components and
   composition, intra-process communication, DDS or discovery tuning, SROS2, micro-ROS, MoveIt 2.
 

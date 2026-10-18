@@ -75,6 +75,10 @@ def yaw_from_quaternion(q):
 # yaw -> quaternion: x = y = 0, z = sin(yaw / 2), w = cos(yaw / 2)
 ```
 
+The course's way is `tf_transformations.euler_from_quaternion` / `quaternion_from_euler` (see
+the TF2 section of the patterns reference). The helper above gives the same yaw without the
+extra package.
+
 ## Differential drive
 
 The robot frame has x forward and y left. b = wheel separation = **0.233 m** on the Create 3.
