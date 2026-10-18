@@ -1,7 +1,12 @@
 # ROS 2 Python patterns (CS 5335, Days 2–4)
 
-These are the course's slide patterns, rewritten as valid Jazzy `rclpy` code in this repo's
-style. The slides are pseudocode. When copying from them, fix these known errors:
+These are **patterns, not facts**. They were written for ROS 2 Jazzy in Fall 2026, and APIs,
+message types and topic names can change. Before using one, check it against the installed
+system, then build and run (constitution, Article II). Start from the simplest pattern that
+does the job (Article III).
+
+They are the course's slide patterns, rewritten as valid `rclpy` code in this repo's style. The
+slides are pseudocode. When copying from them, fix these known errors:
 
 | Slide text | Correct |
 | --- | --- |
@@ -81,6 +86,9 @@ entry_points={
 Run it with `ros2 run mypkg my_node`.
 
 ## Publisher: velocity commands
+
+Check the message type first with `ros2 topic info -v /cmd_vel`. On Jazzy it is
+`TwistStamped`; older releases used `Twist`.
 
 ```python
 from geometry_msgs.msg import TwistStamped
@@ -194,7 +202,9 @@ Action definition (`action/MyAction.action`): goal, then `---`, result, then `--
 The repo's `Drive.action` is an example.
 
 **Server, with cancel**: the execute loop has to keep running while a cancel request
-arrives, so the server needs a `MultiThreadedExecutor`.
+arrives, so the server needs a `MultiThreadedExecutor`. This is the one case where the extra
+complexity is justified (Article III). An action that never needs to be canceled or interrupted
+can use the plain single-threaded `rclpy.spin(node)`.
 
 ```python
 import time
