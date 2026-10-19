@@ -145,6 +145,10 @@ colcon test --packages-select <pkgs> && colcon test-result --verbose
 Read the errors, fix them, and repeat until the code builds and runs. Do not stop at code that
 only looks plausible.
 
+For how the workspace is laid out and built (`src/`, `rosdep`, `colcon build`, sourcing the
+underlay and overlay), follow the official workspace tutorial in
+[Official documentation](#official-documentation).
+
 ### Testing without the robot
 
 Your nodes start without the robot; they just receive no robot data. They must start cleanly,
@@ -215,6 +219,16 @@ checked on it, each with the command to check it. Never claim behavior that was 
 | [references/turtlebot4.md](references/turtlebot4.md) | You need to know what the robot is: hardware, sensors, the three levels of control, odometry, safety features, frames, LiDAR data, how to look up current details |
 | [references/robotics-math.md](references/robotics-math.md) | The task involves transforms, differential drive, pose update, odometry closed loop, error models, Kalman filter / EKF, or occupancy grids |
 | [references/ros2-patterns.md](references/ros2-patterns.md) | You need a skeleton: node, publisher/subscriber, timer, service, action (with cancel), safe stopping, interfaces, parameters, launch, logging, TF2, multithreading |
+
+## Official documentation
+
+| Document | Read when |
+| --- | --- |
+| [ROS 2 tutorial: Creating a workspace](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Creating-A-Workspace/Creating-A-Workspace.html) | Creating or building the workspace: folder layout, `rosdep install`, `colcon build`, sourcing the underlay (`/opt/ros/<distro>`) and the overlay (`install/`) |
+
+This link is the Humble version of the page; the robot here runs Jazzy (`echo $ROS_DISTRO`). For
+anything that differs between distributions, check the same page with `jazzy` in place of
+`humble` in the URL.
 
 Some principles are adapted from
 [arpitg1304/robotics-agent-skills](https://github.com/arpitg1304/robotics-agent-skills)
