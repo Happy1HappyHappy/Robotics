@@ -376,6 +376,11 @@ finally:
     rclpy.try_shutdown()
 ```
 
+**Built-in drive goals** (`drive_distance`, `rotate_angle`, `drive_arc`): the robot ignores
+`cmd_vel` while it runs one, so a zero command does not stop it. On cancel, timeout and shutdown,
+cancel the robot's goal itself with `cancel_goal_async()`. `day3pkg`'s `driver.py` does this in
+`run_robot_goal()` (cancel and a watchdog) and `stop_robot()` (shutdown).
+
 These software stops are an extra layer, not a replacement for the robot's own protections
 (cliff detection, command timeout, e-stop).
 
@@ -399,10 +404,17 @@ Open a fresh terminal (or re-source the setup files) to reconnect to the robot l
 
 ```bash
 ros2 run day3pkg driver
-ros2 node info /driving_node                  # its publishers, subscribers, actions
+ros2 node info /driving_node                  # its publishers, subscribers, action servers and clients
+ros2 run day2pkg node1                        # a node that drives with cmd_vel
 timeout 5 ros2 topic echo /cmd_vel --once     # what it commands
 timeout 5 ros2 topic hz /cmd_vel              # how often
 ```
+
+`day3pkg`'s Driving Node does not drive with `cmd_vel`: it passes each goal on to the Create 3's
+`drive_distance`, `rotate_angle` or `drive_arc` action, so `node info` lists those as action
+clients, and `cmd_vel` only gets a zero command on shutdown. Without the robot those actions do
+not exist, so a goal sent to `/drive` (below) is aborted after about 2 s with
+`not available (is the robot connected?)`.
 
 **Feed it inputs**
 
@@ -624,9 +636,10 @@ To inspect the frame tree: `ros2 run tf2_tools view_frames`.
   `ReentrantCallbackGroup` lets its callbacks run concurrently.
 - The default `SingleThreadedExecutor` runs one callback at a time across all groups. To get
   real concurrency, use `MultiThreadedExecutor`.
-- Pattern used in `driver.py`: the action server goes in a `ReentrantCallbackGroup`, the odom
-  subscription stays in the default group, and a `MultiThreadedExecutor` runs both. As a
-  result, odometry and cancel requests keep arriving while `execute_callback` loops.
+- Pattern used in `driver.py`: the action server and the clients for the robot's built-in
+  actions each go in a `ReentrantCallbackGroup`, the odom subscription stays in the default
+  group, and a `MultiThreadedExecutor` runs them all. As a result, odometry, cancel requests
+  and the robot's replies keep arriving while `execute_callback` waits for the robot.
 - Shared data written by more than one thread needs a lock. Use `with self.lock_:`, never bare
   `acquire()`/`release()`. A single writer with readers that only read a reference (like
   `latest_odom_`) does not need one.

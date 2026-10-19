@@ -1,5 +1,8 @@
 """
 Driving node for the day3pkg package
+Drives with the Create 3's built-in actions (drive_distance, rotate_angle, drive_arc),
+which the robot runs closed loop on its odometry. The old version timed cmd_vel
+commands; that code is kept in execute_callback as comments marked 'old:'
 """
 
 import csv
@@ -10,11 +13,13 @@ from collections import deque
 
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionServer, GoalResponse, CancelResponse
+from rclpy.action import ActionClient, ActionServer, GoalResponse, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import TwistStamped
+from irobot_create_msgs.action import DriveArc, DriveDistance, RotateAngle
 from nav_msgs.msg import Odometry
 
 from day3_interfaces.action import Drive
@@ -38,7 +43,8 @@ def wrap_angle(a):
 class DrivingNode(Node):
     """
     Driving node class for the day3pkg package
-    Handles driving goals via the /drive action server
+    Handles driving goals via the /drive action server, passing each one on to the
+    robot's built-in drive_distance, rotate_angle or drive_arc action
     Logs the motion reported by odometry after each goal
     """
     def __init__(self):
@@ -48,11 +54,25 @@ class DrivingNode(Node):
         self.declare_parameter('linear_speed', 0.15)   # m/s
         self.declare_parameter('angular_speed', 0.5)   # rad/s
         self.declare_parameter('max_angular_speed', 1.82)  # rad/s, Waffle limit (Burger 2.84)
-        self.declare_parameter('rate_hz', 10.0)
+        self.declare_parameter('rate_hz', 10.0)        # Hz, how often to check for a cancel
         self.declare_parameter('settle_time', 1.0)     # s, wait after stop before reading odom
         self.declare_parameter('csv_path', 'odom_results.csv')  # '' = do not save
 
+        # old: drove with this; now only used for a zero command on shutdown
         self.cmd_pub_ = self.create_publisher(TwistStamped, 'cmd_vel', 10)
+
+        # the robot's built-in actions (run on the robot, closed loop on its odometry)
+        # their own reentrant group, so their replies are handled while
+        # execute_callback waits for them
+        robot_group = ReentrantCallbackGroup()
+        self.robot_clients_ = {
+            'drive_distance': ActionClient(self, DriveDistance, 'drive_distance',
+                                           callback_group=robot_group),
+            'rotate_angle': ActionClient(self, RotateAngle, 'rotate_angle',
+                                         callback_group=robot_group),
+            'drive_arc': ActionClient(self, DriveArc, 'drive_arc', callback_group=robot_group),
+        }
+        self.robot_goal_ = None     # the robot's goal running now, so shutdown can cancel it
 
         # latest odometry message, overwritten on every callback (single writer)
         # relative name 'odom' so it follows the same namespace as 'cmd_vel'
@@ -217,11 +237,62 @@ class DrivingNode(Node):
         msg.twist.angular.z = angular
         self.cmd_pub_.publish(msg)
 
+    # ---------- the robot's built-in actions ----------
+    def run_robot_goal(self, goal_handle, action, goal, duration):
+        """
+        Send goal to the robot's built-in action (drive_distance, rotate_angle or
+        drive_arc) and wait until the robot has finished it
+        A cancel of our drive goal is passed on to the robot. A watchdog also cancels the
+        robot's goal if it runs longer than 2 * duration + 5 s (duration: planned time, s)
+        Returns 'succeeded', 'canceled', or what went wrong
+        """
+        client = self.robot_clients_[action]
+        period = 1.0 / self.get_parameter('rate_hz').value
+        if not client.wait_for_server(timeout_sec=2.0):
+            return 'not available (is the robot connected?)'
+        deadline = time.monotonic() + 2.0 * duration + 5.0
+
+        send_future = client.send_goal_async(goal)
+        while not send_future.done():
+            if time.monotonic() > deadline:
+                return 'got no answer from the robot'
+            time.sleep(period)
+        robot_goal = send_future.result()
+        if not robot_goal.accepted:
+            return 'rejected by the robot (is it docked?)'
+
+        self.robot_goal_ = robot_goal
+        try:
+            result_future = robot_goal.get_result_async()
+            stop_reason = None      # set once we cancel the robot's goal
+            while not result_future.done():
+                if stop_reason is None and (goal_handle.is_cancel_requested or
+                                            time.monotonic() > deadline):
+                    # the robot ignores cmd_vel while it runs a goal: cancel the goal itself
+                    stop_reason = 'canceled' if goal_handle.is_cancel_requested else 'timed out'
+                    robot_goal.cancel_goal_async()
+                    deadline = time.monotonic() + 5.0     # time for the robot to confirm
+                elif stop_reason is not None and time.monotonic() > deadline:
+                    return f'{stop_reason}, but the robot did not confirm the cancel'
+                time.sleep(period)
+        finally:
+            self.robot_goal_ = None
+
+        if stop_reason is not None:
+            return stop_reason
+        status = result_future.result().status
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            # the robot aborts its goal on a cliff or a wheel stall (but not on a bump)
+            return f'ended by the robot with status {status}'
+        return 'succeeded'
+
     # ---------- the long-running part ----------
     def execute_callback(self, goal_handle):
         """
-        Execute a driving goal by publishing velocity commands over time
-        Handles straight moves, turns in place, and circular arcs
+        Execute a driving goal with one of the robot's built-in actions:
+        drive_distance for straight moves, rotate_angle for turns in place, and
+        drive_arc for circular arcs; the robot runs them closed loop on its odometry
+        (old: published velocity commands over time; kept below as 'old:' comments)
         Stops the robot if the goal is canceled
         Logs the odometry-reported motion once the robot has come to rest
         """
@@ -230,25 +301,39 @@ class DrivingNode(Node):
         c = goal_handle.request.radius
         v = self.get_parameter('linear_speed').value
         w = self.get_parameter('angular_speed').value
-        period = 1.0 / self.get_parameter('rate_hz').value
+        # old: period = 1.0 / self.get_parameter('rate_hz').value
 
         if c > 0.0:
             # arc (Day 4 inverse kinematics): w = v / c, t = c * theta / v
             # slow down on tight arcs so w stays under the robot's limit
             v = min(v, self.get_parameter('max_angular_speed').value * c)
-            sign = -1.0 if goal_handle.request.turn_right else 1.0   # +angular.z = left
-            linear, angular, duration = v, sign * v / c, c * math.radians(a) / v
-            # arc end point in the start frame: (c sin(theta), +-c (1 - cos(theta)))
+            sign = -1.0 if goal_handle.request.turn_right else 1.0   # + = left (CCW)
+            # old: linear, angular, duration = v, sign * v / c, c * math.radians(a) / v
             th = math.radians(a)
+            duration = c * th / v                       # s at full speed (for the watchdog)
+            action, goal = 'drive_arc', DriveArc.Goal()
+            goal.translate_direction = DriveArc.Goal.TRANSLATE_FORWARD
+            goal.angle = sign * th                      # rad along the arc, + = left
+            goal.radius = float(c)                      # m
+            goal.max_translation_speed = float(v)       # m/s
+            # arc end point in the start frame: (c sin(theta), +-c (1 - cos(theta)))
             target = (c * math.sin(th), sign * c * (1.0 - math.cos(th)), sign * th)
             label = f'a {"r" if goal_handle.request.turn_right else "l"} {c:g} {a:g}'
         elif d > 0.0:
-            linear, angular, duration = v, 0.0, d / v
+            # old: linear, angular, duration = v, 0.0, d / v
+            duration = d / v
+            action, goal = 'drive_distance', DriveDistance.Goal()
+            goal.distance = float(d)                    # m
+            goal.max_translation_speed = float(v)       # m/s
             target = (d, 0.0, 0.0)
             label = f'm {d:g}'
         else:
             # turn in place: sign of angle picks the direction (+ = left/CCW, - = right/CW)
-            linear, angular, duration = 0.0, math.copysign(w, a), math.radians(abs(a)) / w
+            # old: linear, angular, duration = 0.0, math.copysign(w, a), math.radians(abs(a)) / w
+            duration = math.radians(abs(a)) / w
+            action, goal = 'rotate_angle', RotateAngle.Goal()
+            goal.angle = math.radians(a)                # rad, the sign gives the direction
+            goal.max_rotation_speed = float(w)          # rad/s
             target = (0.0, 0.0, math.radians(a))
             label = f't {a:g}'
 
@@ -257,18 +342,33 @@ class DrivingNode(Node):
             self.get_logger().warn('No odometry received yet; motion will not be reported')
 
         start = self.get_clock().now()
-        while (self.get_clock().now() - start).nanoseconds / 1e9 < duration:
-            if goal_handle.is_cancel_requested:
-                self.publish_cmd(0.0, 0.0)  # stop the robot immediately upon cancel request
-                goal_handle.canceled()
-                self.get_logger().info('Goal canceled, robot stopped')
-                return Drive.Result()
-            self.publish_cmd(linear, angular)
-            time.sleep(period)
-
-        self.publish_cmd(0.0, 0.0)          # explicit stop
+        result = self.run_robot_goal(goal_handle, action, goal, duration)
         elapsed = (self.get_clock().now() - start).nanoseconds / 1e9
-        self.get_logger().info(f'Planned {duration:.3f} s, stop sent at {elapsed:.3f} s')
+
+        # old: publish the velocity for the planned time, then stop
+        # while (self.get_clock().now() - start).nanoseconds / 1e9 < duration:
+        #     if goal_handle.is_cancel_requested:
+        #         self.publish_cmd(0.0, 0.0)  # stop the robot immediately upon cancel request
+        #         goal_handle.canceled()
+        #         self.get_logger().info('Goal canceled, robot stopped')
+        #         return Drive.Result()
+        #     self.publish_cmd(linear, angular)
+        #     time.sleep(period)
+        #
+        # self.publish_cmd(0.0, 0.0)          # explicit stop
+        # elapsed = (self.get_clock().now() - start).nanoseconds / 1e9
+        # self.get_logger().info(f'Planned {duration:.3f} s, stop sent at {elapsed:.3f} s')
+
+        if result == 'canceled':
+            goal_handle.canceled()
+            self.get_logger().info('Goal canceled, robot stopped')
+            return Drive.Result()
+        if result != 'succeeded':
+            goal_handle.abort()
+            self.get_logger().warn(f'Goal aborted: {action} {result}')
+            return Drive.Result()
+        self.get_logger().info(f'{action} done in {elapsed:.3f} s '
+                               f'({duration:.3f} s at full speed)')
 
         # let the robot come to rest before reading the end pose
         time.sleep(self.get_parameter('settle_time').value)
@@ -279,6 +379,26 @@ class DrivingNode(Node):
         goal_handle.succeed()
         self.get_logger().info('Goal succeeded')
         return Drive.Result()               # empty for now
+
+    # ---------- shutdown ----------
+    def stop_robot(self, executor):
+        """
+        Stop the robot on shutdown: cancel the robot's goal if one is running (the robot
+        ignores cmd_vel while it runs a goal), then send a zero velocity as before
+        Best effort: once ROS itself is shutting down, the cancel may not get through
+        """
+        robot_goal = self.robot_goal_
+        if robot_goal is not None:
+            try:
+                future = robot_goal.cancel_goal_async()
+                executor.spin_until_future_complete(future, timeout_sec=2.0)
+                if future.done():
+                    self.get_logger().info('Canceled the robot goal')
+                else:
+                    self.get_logger().warn('No answer to canceling the robot goal')
+            except Exception as e:      # whatever fails here, still send the zero command
+                self.get_logger().warn(f'Could not cancel the robot goal: {e}')
+        self.publish_cmd(0.0, 0.0)
 
 
 def main(args=None):
@@ -296,7 +416,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.publish_cmd(0.0, 0.0)
+        # old: node.publish_cmd(0.0, 0.0)    (now done inside stop_robot)
+        node.stop_robot(executor)
         node.destroy_node()
         rclpy.try_shutdown()
 
