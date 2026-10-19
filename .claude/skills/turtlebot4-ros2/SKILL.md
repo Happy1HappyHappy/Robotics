@@ -8,7 +8,8 @@ description: >
   time or QoS. Includes background knowledge on the TurtleBot 4
   and robotics (kinematics, odometry, frames, sensors, Kalman filter, occupancy grids). Use when
   writing, reviewing, designing or debugging any node, launch file, interface or robot behavior
-  here, and when explaining robotics concepts from the course.
+  here, and when explaining robotics concepts from the course. Also use before creating, naming
+  or pushing a git branch in this repo.
 ---
 
 # TurtleBot 4 ROS 2 Development
@@ -25,6 +26,7 @@ the reference files hold background knowledge, not rules.
 - Reviewing or debugging robot code, or working out why the robot does not behave as expected
 - Designing where new functionality should go
 - Explaining robotics concepts from the course (kinematics, odometry, frames, filters, mapping)
+- Creating, naming or pushing a git branch (see [Git branches](#git-branches))
 
 ## Step 1: Identify the context
 
@@ -197,6 +199,14 @@ before it is called done:
 State exactly what was done: built, linted, tested offline (and how), or run on the robot. If
 the robot was not connected, list the robot-specific facts and behaviors that still have to be
 checked on it, each with the command to check it. Never claim behavior that was not observed.
+
+## Git branches
+
+- If the user has not told you which branch to use, **ask for the branch name** before the
+  first commit or push. Do not make one up.
+- A name the environment assigned on its own (for example a cloud session's
+  `claude/<random-words>` default) does not count as the user's choice. Ask anyway.
+- Use the name exactly as the user gives it (for example `project5`).
 
 ## Reference files
 
