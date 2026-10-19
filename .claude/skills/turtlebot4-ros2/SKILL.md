@@ -146,7 +146,7 @@ Read the errors, fix them, and repeat until the code builds and runs. Do not sto
 only looks plausible.
 
 For how the workspace is laid out and built (`src/`, `rosdep`, `colcon build`, sourcing the
-underlay and overlay), follow the official workspace tutorial in
+underlay and overlay), follow the official ROS 2 Jazzy documentation in
 [Official documentation](#official-documentation).
 
 ### Testing without the robot
@@ -224,11 +224,7 @@ checked on it, each with the command to check it. Never claim behavior that was 
 
 | Document | Read when |
 | --- | --- |
-| [ROS 2 tutorial: Creating a workspace](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Creating-A-Workspace/Creating-A-Workspace.html) | Creating or building the workspace: folder layout, `rosdep install`, `colcon build`, sourcing the underlay (`/opt/ros/<distro>`) and the overlay (`install/`) |
-
-This link is the Humble version of the page; the robot here runs Jazzy (`echo $ROS_DISTRO`). For
-anything that differs between distributions, check the same page with `jazzy` in place of
-`humble` in the URL.
+| [ROS 2 Jazzy documentation](https://docs.ros.org/en/jazzy/index.html) | Any ROS 2 question: creating or building the workspace (folder layout, `rosdep install`, `colcon build`, sourcing the underlay and overlay), packages, topics, services, actions, parameters, launch, tf2. Use it before memory or examples from other distributions |
 
 Some principles are adapted from
 [arpitg1304/robotics-agent-skills](https://github.com/arpitg1304/robotics-agent-skills)
