@@ -1,0 +1,114 @@
+"""
+Occupancy grid built from LiDAR scans: log-odds cells, Bresenham ray casting
+Pure NumPy (no ROS), so it can be tested and used without the robot
+"""
+
+import math
+
+import numpy as np
+
+
+def log_odds(p):
+    """
+    Base-10 log-odds of probability p, as in the slides: L = log10(p / (1 - p))
+    """
+    return math.log10(p / (1.0 - p))
+
+
+def bresenham(r0, c0, r1, c1):
+    """
+    Grid cells (row, col) on the line from (r0, c0) up to but not including (r1, c1)
+    Integer-only ray casting; works in every direction
+    """
+    cells = []
+    dr, dc = abs(r1 - r0), abs(c1 - c0)
+    sr, sc = (1 if r1 > r0 else -1), (1 if c1 > c0 else -1)
+    err = dr - dc
+    r, c = r0, c0
+    while (r, c) != (r1, c1):
+        cells.append((r, c))
+        e2 = 2 * err
+        if e2 > -dc:
+            err -= dc
+            r += sr
+        if e2 < dr:
+            err += dr
+            c += sc
+    return cells
+
+
+class OccupancyGrid:
+    """
+    Square occupancy grid centered on the world origin, one log-odds value per cell
+    World frame: x forward and y left as the robot faced at the start (REP 103)
+    The array is laid out like the image it is drawn as: row 0 is the far +x edge (top),
+    col 0 is the far +y edge (left), so the robot's start heading points up
+    L = 0 is unknown (p = 0.5), L > 0 leans occupied, L < 0 leans free
+    """
+    def __init__(self, size=200, resolution=0.05, p_free=0.1, p_occupied=0.9, clamp=3.0):
+        """
+        size: cells per side (200 x 5 cm = 10 m x 10 m)
+        resolution: cell side in meters
+        p_free / p_occupied: probability a cell is occupied, given a ray passed through it /
+        ended in it; added to the cell as log-odds
+        clamp: |L| limit, so a cell can change state again later
+        """
+        self.size = size
+        self.resolution = resolution
+        self.l_free = log_odds(p_free)
+        self.l_occupied = log_odds(p_occupied)
+        self.clamp = clamp
+        self.log_odds = np.zeros((size, size))
+
+    def world_to_cell(self, x, y):
+        """
+        Cell (row, col) that holds world point (x, y), in meters
+        The world origin is the corner shared by the four center cells
+        The result may lie outside the grid; check it with in_bounds()
+        """
+        half = self.size // 2
+        return (half - 1 - math.floor(x / self.resolution),
+                half - 1 - math.floor(y / self.resolution))
+
+    def in_bounds(self, row, col):
+        """
+        Check that (row, col) is a cell of the grid
+        """
+        return 0 <= row < self.size and 0 <= col < self.size
+
+    def update(self, pose, ranges, angle_min, angle_increment, range_min, range_max):
+        """
+        Add one LiDAR scan taken from sensor pose (x, y, yaw) in the world frame (m, rad)
+        Ray k points at angle_min + k * angle_increment in the sensor frame (CCW, 0 = sensor x)
+        Each valid ray marks the cells it passes through as free and its end cell as occupied
+        Every cell is updated at most once per scan; if any ray ends in a cell, occupied wins
+        Ranges outside [range_min, range_max], inf and nan are skipped
+        Returns the number of rays used
+        """
+        x, y, yaw = pose
+        r0, c0 = self.world_to_cell(x, y)
+        free = np.zeros(self.log_odds.shape, dtype=bool)
+        occupied = np.zeros(self.log_odds.shape, dtype=bool)
+        used = 0
+        for k, r in enumerate(ranges):
+            if not range_min <= r <= range_max:     # also False for nan
+                continue
+            a = yaw + angle_min + k * angle_increment
+            r1, c1 = self.world_to_cell(x + r * math.cos(a), y + r * math.sin(a))
+            for row, col in bresenham(r0, c0, r1, c1):
+                if self.in_bounds(row, col):
+                    free[row, col] = True
+            if self.in_bounds(r1, c1):
+                occupied[r1, c1] = True
+            used += 1
+        free &= ~occupied
+        self.log_odds[free] += self.l_free
+        self.log_odds[occupied] += self.l_occupied
+        np.clip(self.log_odds, -self.clamp, self.clamp, out=self.log_odds)
+        return used
+
+    def probability(self):
+        """
+        Occupancy probability of every cell: p = 1 - 1 / (1 + 10^L)
+        """
+        return 1.0 - 1.0 / (1.0 + np.power(10.0, self.log_odds))

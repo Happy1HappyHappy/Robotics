@@ -7,7 +7,7 @@ built on ROS 2 Jazzy and a TurtleBot 4.
 
 | Path                                       | Contents                                                     |
 | ------------------------------------------ | ------------------------------------------------------------ |
-| [`robotics_ws/`](robotics_ws/README.md)    | colcon workspace with the ROS 2 packages for Projects 2-5    |
+| [`robotics_ws/`](robotics_ws/README.md)    | colcon workspace with the ROS 2 packages for Projects 2-6    |
 | `Week1/`                                   | One-line scripts that drive the robot from the command line  |
 | `related_cmds.txt`                         | Setup and debugging commands                                 |
 
@@ -19,6 +19,7 @@ built on ROS 2 Jazzy and a TurtleBot 4.
 | 3       | ROS actions                   | [`day3pkg`](robotics_ws/src/day3pkg/README.md)                     |
 | 4       | Turns and arcs (kinematics)   | [`day3pkg`](robotics_ws/src/day3pkg/README.md)                     |
 | 5       | Odometry                      | [`day3pkg`](robotics_ws/src/day3pkg/README.md#odometry)           |
+| 6       | Occupancy grid from LiDAR     | [`day3pkg`](robotics_ws/src/day3pkg/README.md#occupancy-grid-project-6) |
 
 ## Quick start
 

@@ -8,7 +8,8 @@ description: >
   time or QoS. Includes background knowledge on the TurtleBot 4
   and robotics (kinematics, odometry, frames, sensors, Kalman filter, occupancy grids). Use when
   writing, reviewing, designing or debugging any node, launch file, interface or robot behavior
-  here, and when explaining robotics concepts from the course.
+  here, and when explaining robotics concepts from the course. Also use before creating, naming
+  or pushing a git branch in this repo.
 ---
 
 # TurtleBot 4 ROS 2 Development
@@ -25,6 +26,7 @@ the reference files hold background knowledge, not rules.
 - Reviewing or debugging robot code, or working out why the robot does not behave as expected
 - Designing where new functionality should go
 - Explaining robotics concepts from the course (kinematics, odometry, frames, filters, mapping)
+- Creating, naming or pushing a git branch (see [Git branches](#git-branches))
 
 ## Step 1: Identify the context
 
@@ -143,6 +145,10 @@ colcon test --packages-select <pkgs> && colcon test-result --verbose
 Read the errors, fix them, and repeat until the code builds and runs. Do not stop at code that
 only looks plausible.
 
+For how the workspace is laid out and built (`src/`, `rosdep`, `colcon build`, sourcing the
+underlay and overlay), follow the official ROS 2 Jazzy documentation in
+[Official documentation](#official-documentation).
+
 ### Testing without the robot
 
 Your nodes start without the robot; they just receive no robot data. They must start cleanly,
@@ -198,6 +204,14 @@ State exactly what was done: built, linted, tested offline (and how), or run on 
 the robot was not connected, list the robot-specific facts and behaviors that still have to be
 checked on it, each with the command to check it. Never claim behavior that was not observed.
 
+## Git branches
+
+- If the user has not told you which branch to use, **ask for the branch name** before the
+  first commit or push. Do not make one up.
+- A name the environment assigned on its own (for example a cloud session's
+  `claude/<random-words>` default) does not count as the user's choice. Ask anyway.
+- Use the name exactly as the user gives it (for example `project5`).
+
 ## Reference files
 
 | File | Read when |
@@ -205,6 +219,12 @@ checked on it, each with the command to check it. Never claim behavior that was 
 | [references/turtlebot4.md](references/turtlebot4.md) | You need to know what the robot is: hardware, sensors, the three levels of control, odometry, safety features, frames, LiDAR data, how to look up current details |
 | [references/robotics-math.md](references/robotics-math.md) | The task involves transforms, differential drive, pose update, odometry closed loop, error models, Kalman filter / EKF, or occupancy grids |
 | [references/ros2-patterns.md](references/ros2-patterns.md) | You need a skeleton: node, publisher/subscriber, timer, service, action (with cancel), safe stopping, interfaces, parameters, launch, logging, TF2, multithreading |
+
+## Official documentation
+
+| Document | Read when |
+| --- | --- |
+| [ROS 2 Jazzy documentation](https://docs.ros.org/en/jazzy/index.html) | Any ROS 2 question: creating or building the workspace (folder layout, `rosdep install`, `colcon build`, sourcing the underlay and overlay), packages, topics, services, actions, parameters, launch, tf2. Use it before memory or examples from other distributions |
 
 Some principles are adapted from
 [arpitg1304/robotics-agent-skills](https://github.com/arpitg1304/robotics-agent-skills)
