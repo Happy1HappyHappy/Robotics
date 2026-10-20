@@ -37,6 +37,10 @@ In the image, black is occupied, white is free and gray is unknown. The green ci
 the start, the blue dots are the sensor's position at each update, and the red arrow is
 the robot's current heading. The bar in the bottom-left corner is 1 m.
 
+Example image:
+<img width="1812" height="600" alt="grid_summary" src="https://github.com/user-attachments/assets/2010fb33-4cf8-4db3-a9eb-5d0574209ab3" />
+
+
 ## The LiDAR is mounted rotated by 90°
 
 In the TurtleBot 4's URDF, the RPLIDAR (`rplidar_link`) sits 4 cm behind the robot's
