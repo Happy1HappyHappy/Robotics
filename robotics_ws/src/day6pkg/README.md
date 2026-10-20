@@ -13,7 +13,8 @@ grid itself is in `grid.py` and the drawing in `render.py`.
 
 The Grid Node **never moves the robot**. Drive it with the robot's `drive_distance`
 action or the Executive in [`day3pkg`](../day3pkg/README.md) (see
-[Task 2](#task-2-drive-1-m-and-update-every-01-m)).
+[Task 2](#task-2-drive-1-m-and-update-every-01-m)). `launch/day6_launch.py` starts the
+Grid Node together with `day3pkg`'s Driving and Executive nodes.
 
 ## The grid
 
@@ -67,33 +68,58 @@ colcon build --packages-select day6pkg
 source install/setup.bash
 ```
 
-Rebuild `day6pkg` whenever a Python file changes. To drive with the Executive in Task 2,
-build `day3_interfaces` and `day3pkg` as well (see the
-[day3pkg README](../day3pkg/README.md#build-and-run)).
+Rebuild `day6pkg` whenever a Python file or the launch file changes. The launch file also
+starts `day3pkg`'s nodes, so for it build all three packages:
+
+```bash
+colcon build --packages-select day3_interfaces day3pkg day6pkg
+source install/setup.bash
+```
+
+`day3pkg` has its own needs (`xterm` for the Executive, `irobot_create_msgs` for the
+Driving Node); see the [day3pkg README](../day3pkg/README.md#build-and-run).
 
 ## Task 1: occupancy grid from one scan
 
-Start the Grid Node with the robot standing still (step 2 of Task 2). Its first update
+Start the Grid Node with the robot standing still (alone or with the launch file; see
+Task 2). Its first update
 is Task 1: one scan with the sensor at the origin, shown in the window and saved as
 `grid_0.00m.png`.
 
 ## Task 2: drive 1 m and update every 0.1 m
 
-1. Put the robot on the floor with about 1.5 m of clear space in front of it. If it is
-   docked, undock it first:
+First put the robot on the floor with about 1.5 m of clear space in front of it. If it
+is docked, undock it (the LiDAR may also be off while it is docked):
 
-   ```bash
-   ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
-   ```
+```bash
+ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
+```
 
-2. Terminal 1: start the Grid Node while the robot stands still, and wait for
+### With the launch file (one command)
+
+```bash
+ros2 launch day6pkg day6_launch.py
+```
+
+1. The Grid Node logs in this terminal and opens the grid window; `day3pkg`'s Executive
+   opens in its own `xterm` window. Wait for `Update 1` (the start grid).
+2. In the Executive window, type `m 1.0`.
+3. After `All snapshots saved`, type `q` in the Executive. This stops the whole launch,
+   and the Grid Node saves `grid_final.png` on the way out.
+
+This needs a desktop (the `xterm` and the grid window). Over SSH without X forwarding,
+use separate terminals instead.
+
+### In separate terminals
+
+1. Terminal 1: start the Grid Node while the robot stands still, and wait for
    `Update 1` (the start grid):
 
    ```bash
    ros2 run day6pkg mapper
    ```
 
-3. Terminal 2: drive 1 m forward, slowly. Either use the robot's built-in action
+2. Terminal 2: drive 1 m forward, slowly. Either use the robot's built-in action
    (closed loop on odometry, stops on cliffs):
 
    ```bash
@@ -102,7 +128,7 @@ is Task 1: one scan with the sensor at the origin, shown in the window and saved
 
    or the Executive in `day3pkg`: `ros2 launch day3pkg day3_launch.py`, then `m 1.0`.
 
-4. After `All snapshots saved`, stop the Grid Node with Ctrl-C.
+3. After `All snapshots saved`, stop the Grid Node with Ctrl-C.
 
 The Grid Node adds a scan to the grid at the start and then after every 0.1 m of
 travel (11 updates for 1 m), and logs each one:

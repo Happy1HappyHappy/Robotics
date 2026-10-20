@@ -13,17 +13,18 @@ import os
 
 import cv2
 from nav_msgs.msg import Odometry           # for the robot's odometry(/odom)
-from geometry_msgs.msg import PoseStamped   # for the robot's pose
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data   # Quality of Service profile for sensor data, with a queue depth of 5 and best effort reliability
+# Quality of Service profile for sensor data, with a queue depth of 5 and best effort reliability
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan       # for the LiDAR scans(/scan)
 from tf2_ros import TransformException      # for looking up transforms from TF (/tf_static)
 from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener    # for the LiDAR's mounting on the robot (TF)
+# for the LiDAR's mounting on the robot (TF)
+from tf2_ros.transform_listener import TransformListener
 
 from day6pkg.grid import OccupancyGrid
 from day6pkg.render import grid_image, summary_image
@@ -83,7 +84,8 @@ class GridNode(Node):
 
         # the LiDAR's mounting comes from the robot's static transforms (/tf_static)
         self.tf_buffer_ = Buffer()  # store the transforms, so they can be looked up later
-        self.tf_listener_ = TransformListener(self.tf_buffer_, self)    # listen for the transforms and add them to the buffer
+        # listen for the transforms and add them to the buffer
+        self.tf_listener_ = TransformListener(self.tf_buffer_, self)
 
         self.odom_ = None               # latest odometry pose (x, y, yaw), odom frame
         self.odom_time_ = None          # when it arrived (node clock)

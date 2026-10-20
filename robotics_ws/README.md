@@ -51,7 +51,8 @@ To build one package only: `colcon build --packages-select <pkg>`.
 ```bash
 ros2 run day2pkg node1            # Project 2
 ros2 launch day3pkg day3_launch.py   # Projects 3, 4 and 5
-ros2 run day6pkg mapper              # Project 6
+ros2 run day6pkg mapper              # Project 6 (Grid Node only)
+ros2 launch day6pkg day6_launch.py   # Project 6 with day3pkg's Driving + Executive
 ```
 
 For Project 5 (odometry), see the

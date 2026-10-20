@@ -104,7 +104,8 @@ class OccupancyGrid:
                 occupied[r1, c1] = True
             used += 1
         free &= ~occupied   # only mark free if free and not occupied
-        self.log_odds[free] += self.l_free  # numpy boolean indexing: add to all cells where free is True
+        # numpy boolean indexing: add to all cells where free is True
+        self.log_odds[free] += self.l_free
         self.log_odds[occupied] += self.l_occupied
         # clamp the log-odds to avoid runaway certainty
         np.clip(self.log_odds, -self.clamp, self.clamp, out=self.log_odds)
