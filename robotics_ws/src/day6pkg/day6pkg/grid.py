@@ -89,21 +89,24 @@ class OccupancyGrid:
         r0, c0 = self.world_to_cell(x, y)
         free = np.zeros(self.log_odds.shape, dtype=bool)
         occupied = np.zeros(self.log_odds.shape, dtype=bool)
-        used = 0
+        used = 0    # number of rays that were valid and used to update the grid
         for k, r in enumerate(ranges):
             if not range_min <= r <= range_max:     # also False for nan
                 continue
-            a = yaw + angle_min + k * angle_increment
+            a = yaw + angle_min + k * angle_increment  # angle of ray k in the world frame
+            # Calculate the end point of the ray in the world frame
             r1, c1 = self.world_to_cell(x + r * math.cos(a), y + r * math.sin(a))
+            # Mark the cells along the ray as free, and the end cell as occupied
             for row, col in bresenham(r0, c0, r1, c1):
                 if self.in_bounds(row, col):
                     free[row, col] = True
             if self.in_bounds(r1, c1):
                 occupied[r1, c1] = True
             used += 1
-        free &= ~occupied
-        self.log_odds[free] += self.l_free
+        free &= ~occupied   # only mark free if free and not occupied
+        self.log_odds[free] += self.l_free  # numpy boolean indexing: add to all cells where free is True
         self.log_odds[occupied] += self.l_occupied
+        # clamp the log-odds to avoid runaway certainty
         np.clip(self.log_odds, -self.clamp, self.clamp, out=self.log_odds)
         return used
 
