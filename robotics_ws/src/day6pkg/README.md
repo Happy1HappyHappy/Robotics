@@ -2,12 +2,14 @@
 
 ROS 2 package for CS 5335 Project 6: the **Grid Node** (`mapper.py`) builds an occupancy
 grid from the TurtleBot's LiDAR. It reads `/scan`, places each scan using `/odom` and the
-LiDAR's mounting on the robot (from TF), and draws and saves the grid as an image. The
-grid itself is in `grid.py` and the drawing in `render.py`.
+LiDAR's mounting on the robot (from TF), and draws and saves the grid as an image. When
+it stops, it also saves the grid itself as `grid.npz`, which
+[`day7pkg`](../day7pkg/README.md) reads for Project 7. The grid itself is in `grid.py` and
+the drawing in `render.py`.
 
 ```
  /scan       LaserScan ──┐
- /odom       Odometry  ──┼──> Grid Node ──> window + grid_*.png
+ /odom       Odometry  ──┼──> Grid Node ──> window + grid_*.png + grid.npz
  /tf_static  LiDAR pose ─┘     mapper.py
 ```
 
@@ -153,6 +155,7 @@ Images saved in the directory you started it from (or `output_dir`):
 | `grid_1.00m.png` | After the complete 1 m |
 | `grid_summary.png` | The snapshots so far, side by side, to show the instructor |
 | `grid_final.png` | The grid when the node was stopped (Ctrl-C) |
+| `grid.npz` | The grid when the node was stopped, as data: `log_odds`, `resolution`, `poses` (sensor x, y and robot heading at each update) and `world_from_odom` (the grid's frame relative to odometry). Read it with `OccupancyGrid.load()` |
 
 How travel is measured: the straight-line distance of the robot's odometry position from
 where it was at the first update. For a straight drive this is the distance driven, and
@@ -180,7 +183,7 @@ Set with `--ros-args -p name:=value`, e.g.
 | `max_odom_age` | `0.5` | Skip scans when the latest odometry is older than this, s |
 | `use_tf` | `true` | Read the LiDAR mounting from TF |
 | `mount_yaw` | `90.0` | LiDAR yaw on the robot when `use_tf` is false, degrees |
-| `output_dir` | `.` | Where the images are saved (must exist) |
+| `output_dir` | `.` | Where the images and `grid.npz` are saved (created if missing) |
 | `display` | `true` | Show the grid in a window (skipped without a display) |
 | `image_scale` | `3` | Image pixels per cell side |
 

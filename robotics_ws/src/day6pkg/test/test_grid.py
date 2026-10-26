@@ -4,6 +4,7 @@ Tests of the occupancy grid (no ROS, no robot): python3 -m pytest test/test_grid
 
 import math
 
+import numpy as np
 import pytest
 
 from day6pkg.grid import bresenham, log_odds, OccupancyGrid
@@ -32,6 +33,27 @@ def test_world_to_cell_puts_forward_up_and_left_left():
     assert g.world_to_cell(4.99, 4.99) == (0, 0)
     assert g.in_bounds(*g.world_to_cell(-4.99, -4.99))
     assert not g.in_bounds(*g.world_to_cell(5.0, 0.0))
+
+
+def test_cell_to_world_is_the_center_of_the_cell():
+    g = OccupancyGrid(200, 0.05)
+    assert g.cell_to_world(99, 99) == pytest.approx((0.025, 0.025))
+    for x, y in [(0.0, 0.0), (1.23, -0.41), (-2.0, 3.99)]:
+        cx, cy = g.cell_to_world(*g.world_to_cell(x, y))
+        assert abs(cx - x) <= 0.025 + 1e-9 and abs(cy - y) <= 0.025 + 1e-9
+        assert g.world_to_cell(cx, cy) == g.world_to_cell(x, y)
+
+
+def test_save_and_load_keep_the_grid_and_the_extra_arrays(tmp_path):
+    g = OccupancyGrid(60, 0.05)
+    g.update((0.0, 0.0, 0.0), [1.0, 0.8], 0.0, 1.0, 0.1, 10.0)
+    path = str(tmp_path / 'grid.npz')
+    g.save(path, poses=np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]]), world_from_odom=np.eye(3))
+    h, extra = OccupancyGrid.load(path)
+    assert h.size == 60 and h.resolution == pytest.approx(0.05)
+    assert np.array_equal(h.log_odds, g.log_odds)
+    assert extra['poses'].shape == (2, 3)
+    assert np.array_equal(extra['world_from_odom'], np.eye(3))
 
 
 def test_one_ray_marks_free_cells_then_one_occupied_cell():

@@ -5,6 +5,7 @@ and the LiDAR's mounting on the robot (TF)
 Task 1: the first scan is added with the sensor at the origin
 Task 2: as the robot drives, a scan is added after every update_distance of travel, and the
 grid is saved as an image at each snapshot distance (by default 0, 0.5 and 1.0 m)
+On shutdown the grid itself is saved as grid.npz too, for day7pkg (Project 7)
 This node never moves the robot; drive it with day3pkg or the robot's drive_distance action
 """
 
@@ -78,6 +79,8 @@ class GridNode(Node):
         self.declare_parameter('display', True)             # show the grid in a window
         self.declare_parameter('image_scale', 3)            # image pixels per cell side
 
+        # each Project 7 run saves to its own folder, so create it if it is missing
+        os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
         self.grid_ = OccupancyGrid(self.get_parameter('size').value,
                                    self.get_parameter('resolution').value)
         self.scale_ = self.get_parameter('image_scale').value
@@ -236,10 +239,20 @@ class GridNode(Node):
     def save_final(self):
         """
         Save the grid as it is now, so the last state is kept even if a snapshot distance
-        was never reached
+        was never reached: the image, and the grid itself as grid.npz with the poses and
+        ^world T_odom (day7pkg reads it; two runs' ^world T_odom give odometry's estimate of
+        how one grid's frame sits in the other's)
         """
-        if self.image_ is not None:
-            self.save_image('grid_final.png', self.image_)
+        if self.image_ is None:     # no update yet: nothing to save
+            return
+        self.save_image('grid_final.png', self.image_)
+        path = os.path.join(self.get_parameter('output_dir').value, 'grid.npz')
+        try:
+            self.grid_.save(path, poses=np.array(self.poses_),
+                            world_from_odom=self.world_from_odom_)
+            self.get_logger().info(f'Saved {path}')
+        except OSError as e:
+            self.get_logger().warn(f'Could not save {path}: {e}')
 
     def display_callback(self):
         """

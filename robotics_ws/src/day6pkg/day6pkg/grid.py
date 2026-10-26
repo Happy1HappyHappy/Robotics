@@ -70,6 +70,16 @@ class OccupancyGrid:
         return (half - 1 - math.floor(x / self.resolution),
                 half - 1 - math.floor(y / self.resolution))
 
+    def cell_to_world(self, row, col):
+        """
+        World point (x, y), in meters, at the center of cell (row, col): the inverse of
+        world_to_cell() for cell centers
+        Works on NumPy arrays of rows and cols too
+        """
+        half = self.size // 2
+        return ((half - 0.5 - row) * self.resolution,
+                (half - 0.5 - col) * self.resolution)
+
     def in_bounds(self, row, col):
         """
         Check that (row, col) is a cell of the grid
@@ -116,3 +126,22 @@ class OccupancyGrid:
         Occupancy probability of every cell: p = 1 - 1 / (1 + 10^L)
         """
         return 1.0 - 1.0 / (1.0 + np.power(10.0, self.log_odds))
+
+    def save(self, path, **extra):
+        """
+        Write the grid to a NumPy .npz file: the log-odds and the resolution, plus any extra
+        arrays given as keyword arguments (e.g. poses=...); read it back with load()
+        """
+        np.savez(path, log_odds=self.log_odds, resolution=self.resolution, **extra)
+
+    @classmethod
+    def load(cls, path):
+        """
+        Read a grid written by save()
+        Returns (grid, dict of the extra arrays)
+        """
+        with np.load(path) as data:
+            grid = cls(data['log_odds'].shape[0], float(data['resolution']))
+            grid.log_odds = data['log_odds'].copy()
+            extra = {k: data[k] for k in data.files if k not in ('log_odds', 'resolution')}
+        return grid, extra
