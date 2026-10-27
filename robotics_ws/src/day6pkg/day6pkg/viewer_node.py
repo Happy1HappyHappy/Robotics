@@ -1,0 +1,224 @@
+"""
+Viewer node for the day6pkg package (Projects 6 and 7)
+Draws what the other nodes publish, and nothing else does any drawing: the grid (/grid) with
+the sensor's path (/grid_path), the wall segments (/wall_segments) and the corner landmarks
+(/landmarks) on top, shown in a window
+Saves the image at each snapshot distance of travel (with a summary of them side by side),
+and the last one as grid_final.png on shutdown (save_images)
+Without this node the others run the same; without the Landmark Node it draws the grid only
+"""
+
+import math
+import os
+
+import cv2
+from geometry_msgs.msg import PoseArray                 # the landmarks (/landmarks)
+from nav_msgs.msg import OccupancyGrid as GridMsg       # the grid (/grid)
+from nav_msgs.msg import Path                           # the path (/grid_path)
+import numpy as np
+import rclpy
+from rclpy.executors import ExternalShutdownException
+from rclpy.node import Node
+# the publishers keep their latest message (transient local), so this node gets each topic
+# at once even if it starts later
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from visualization_msgs.msg import Marker               # the wall segments (/wall_segments)
+
+from day6pkg.occupancy_grid import OccupancyGrid
+from day6pkg.render import map_image, summary_image
+
+WINDOW = 'Occupancy grid'
+
+
+class ViewerNode(Node):
+    """
+    Viewer node class for the day6pkg package
+    Callbacks only store the latest messages; a timer redraws when something changed
+    """
+    def __init__(self):
+        super().__init__('viewer_node')
+
+        self.declare_parameter('snapshot_distances', [0.0, 0.5, 1.0])  # m, save an image at each
+        self.declare_parameter('distance_tolerance', 0.03)  # m, this short of a distance counts
+        self.declare_parameter('image_scale', 3)            # image pixels per cell side
+        self.declare_parameter('display', True)             # show the image in a window
+        self.declare_parameter('save_images', True)         # save snapshots and grid_final.png
+        self.declare_parameter('output_dir', '.')           # where the images are saved
+
+        self.save_ = self.get_parameter('save_images').value
+        if self.save_:
+            os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
+
+        self.grid_msg_ = None           # latest /grid
+        self.path_msg_ = None           # latest /grid_path
+        self.grid_ = None               # latest grid (day6pkg OccupancyGrid)
+        self.poses_ = []                # (x, y, heading) of each update, from the path
+        self.segments_ = []             # [(start, end), ...], m
+        self.corners_ = np.zeros((0, 2))    # K x 2, m
+        self.last_update_ = None        # stamp of the last grid update handled
+        self.changed_ = False           # something new to draw
+        self.snapshots_ = {}            # snapshot distance (m) -> image
+        self.image_ = None
+        self.window_open_ = False
+
+        latest = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(GridMsg, 'grid', self.grid_callback, latest)
+        self.create_subscription(Path, 'grid_path', self.path_callback, latest)
+        self.create_subscription(PoseArray, 'landmarks', self.landmark_callback, latest)
+        self.create_subscription(Marker, 'wall_segments', self.segment_callback, latest)
+        self.draw_timer_ = self.create_timer(0.1, self.draw_callback)
+
+        self.display_ = self.get_parameter('display').value
+        if self.display_ and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+            self.get_logger().warn('No display found; images are only saved to files')
+            self.display_ = False
+        self.get_logger().info('Viewer Node ready, waiting for /grid')
+
+    # ---------- subscriptions: store only ----------
+    def grid_callback(self, msg: GridMsg):
+        """
+        Store the latest grid
+        """
+        self.grid_msg_ = msg
+        self.changed_ = True
+
+    def path_callback(self, msg: Path):
+        """
+        Store the latest path
+        """
+        self.path_msg_ = msg
+        self.changed_ = True
+
+    def landmark_callback(self, msg: PoseArray):
+        """
+        Store the latest corner landmarks
+        """
+        self.corners_ = np.array([[p.position.x, p.position.y] for p in msg.poses]).reshape(-1, 2)
+        self.changed_ = True
+
+    def segment_callback(self, msg: Marker):
+        """
+        Store the latest wall segments (a line list: two points per segment)
+        """
+        ends = [np.array([p.x, p.y]) for p in msg.points]
+        self.segments_ = list(zip(ends[0::2], ends[1::2]))
+        self.changed_ = True
+
+    # ---------- drawing ----------
+    def draw_callback(self):
+        """
+        Redraw if something changed; save the snapshots of each new grid update; show
+        """
+        if self.changed_ and self.grid_msg_ is not None:
+            self.changed_ = False
+            update = self.new_update()
+            if update:
+                self.grid_ = OccupancyGrid.from_ros_layout(self.grid_msg_.data,
+                                                           self.grid_msg_.info.resolution)
+                self.poses_ = [(p.pose.position.x, p.pose.position.y,
+                                2.0 * math.atan2(p.pose.orientation.z, p.pose.orientation.w))
+                               for p in self.path_msg_.poses]
+            if self.grid_ is not None:
+                self.image_ = map_image(self.grid_, self.get_parameter('image_scale').value,
+                                        self.poses_, self.segments_, self.corners_,
+                                        self.label())
+                if update and self.save_:
+                    self.save_snapshots()
+        if self.display_ and self.image_ is not None:
+            try:
+                cv2.imshow(WINDOW, self.image_)
+                cv2.waitKey(1)
+                self.window_open_ = True
+            except cv2.error as e:
+                self.get_logger().warn(f'Cannot show the image ({e}); it is still saved')
+                self.display_ = False
+
+    def new_update(self):
+        """
+        Check that the latest grid and path belong to the same grid update (the Grid Node
+        stamps both alike) and that it has not been handled yet
+        """
+        if self.path_msg_ is None:
+            return False
+        stamp = self.grid_msg_.header.stamp
+        if stamp != self.path_msg_.header.stamp or stamp == self.last_update_:
+            return False
+        self.last_update_ = stamp
+        return True
+
+    def traveled(self):
+        """
+        Straight-line distance (m) of the latest pose from the first one
+        """
+        if not self.poses_:
+            return 0.0
+        return math.hypot(self.poses_[-1][0] - self.poses_[0][0],
+                          self.poses_[-1][1] - self.poses_[0][1])
+
+    def label(self):
+        """
+        Text in the image's corner
+        """
+        return (f'{self.traveled():.2f} m traveled, {len(self.poses_)} scans, '
+                f'{len(self.corners_)} landmarks')
+
+    # ---------- saving ----------
+    def save_snapshots(self):
+        """
+        Save the image for each snapshot distance just reached, then the summary image
+        with all snapshots so far side by side
+        """
+        traveled = self.traveled()
+        tolerance = self.get_parameter('distance_tolerance').value
+        distances = self.get_parameter('snapshot_distances').value
+        reached = [d for d in distances if d not in self.snapshots_ and traveled >= d - tolerance]
+        if not reached:
+            return
+        for d in reached:
+            self.snapshots_[d] = self.image_
+            self.save_image(f'grid_{d:.2f}m.png', self.image_)
+        self.save_image('grid_summary.png',
+                        summary_image([self.snapshots_[d] for d in sorted(self.snapshots_)]))
+        if len(self.snapshots_) == len(distances):
+            self.get_logger().info('All snapshots saved')
+
+    def save_image(self, name, img):
+        """
+        Write an image to output_dir, logging the path or the failure
+        """
+        path = os.path.join(self.get_parameter('output_dir').value, name)
+        if cv2.imwrite(path, img):
+            self.get_logger().info(f'Saved {path}')
+        else:
+            self.get_logger().warn(f'Could not save {path}')
+
+    def save_final(self):
+        """
+        Save the last image as grid_final.png (if save_images)
+        """
+        if self.save_ and self.image_ is not None:
+            self.save_image('grid_final.png', self.image_)
+
+
+def main(args=None):
+    """
+    Entry point for the viewer node
+    Initializes the ROS 2 system, creates the node, and spins it
+    Saves the last image and closes the window on shutdown
+    """
+    rclpy.init(args=args)
+    node = ViewerNode()
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        node.save_final()
+        if node.window_open_:
+            cv2.destroyAllWindows()
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+    main()

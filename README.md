@@ -20,6 +20,7 @@ built on ROS 2 Jazzy and a TurtleBot 4.
 | 4       | Turns and arcs (kinematics)   | [`day3pkg`](robotics_ws/src/day3pkg/README.md)                     |
 | 5       | Odometry                      | [`day3pkg`](robotics_ws/src/day3pkg/README.md#odometry)           |
 | 6       | Occupancy grid from LiDAR     | [`day6pkg`](robotics_ws/src/day6pkg/README.md)                     |
+| 7       | Landmarks (RANSAC corners)    | [`day6pkg`](robotics_ws/src/day6pkg/README.md#project-7-landmarks-while-driving) |
 
 ## Quick start
 

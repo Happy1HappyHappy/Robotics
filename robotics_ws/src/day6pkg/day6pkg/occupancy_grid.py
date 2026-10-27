@@ -116,3 +116,47 @@ class OccupancyGrid:
         Occupancy probability of every cell: p = 1 - 1 / (1 + 10^L)
         """
         return 1.0 - 1.0 / (1.0 + np.power(10.0, self.log_odds))
+
+    def ros_layout(self):
+        """
+        The grid laid out as nav_msgs/OccupancyGrid wants it: (values, origin)
+        values: size x size int8, occupancy probability in percent (-1 = unknown, L = 0);
+        row j counts from the -y edge and column i from the -x edge, so data[j * size + i]
+        origin: world (x, y) in meters of the outer corner of cell (i, j) = (0, 0)
+        """
+        values = np.round(self.probability() * 100.0).astype(np.int8)
+        values[self.log_odds == 0.0] = -1
+        corner = (self.size // 2 - self.size) * self.resolution
+        return np.ascontiguousarray(values[::-1, ::-1].T), (corner, corner)
+
+    @classmethod
+    def from_ros_layout(cls, values, resolution):
+        """
+        Grid from a nav_msgs/OccupancyGrid laid out by ros_layout() (values: size * size)
+        Percentages become log-odds again, so thresholds on log-odds still apply
+        """
+        size = math.isqrt(len(values))
+        percent = np.asarray(values, dtype=float).reshape(size, size).T[::-1, ::-1]
+        p = np.where(percent < 0.0, 50.0, percent) / 100.0   # -1 = unknown: p = 0.5, L = 0
+        grid = cls(size, resolution)
+        with np.errstate(divide='ignore'):                   # p = 0 or 1: L = -inf or inf
+            grid.log_odds = np.clip(np.log10(p / (1.0 - p)), -grid.clamp, grid.clamp)
+        return grid
+
+    def save(self, path, **extra):
+        """
+        Write the grid to path as a NumPy .npz file: log-odds, resolution, and any extra
+        arrays passed by name (e.g. poses=...)
+        """
+        np.savez(path, log_odds=self.log_odds, resolution=self.resolution, **extra)
+
+    @classmethod
+    def load(cls, path):
+        """
+        Read a grid written by save(); returns (grid, dict of the extra arrays)
+        """
+        with np.load(path) as data:
+            grid = cls(data['log_odds'].shape[0], float(data['resolution']))
+            grid.log_odds = data['log_odds'].copy()
+            extra = {k: data[k] for k in data.files if k not in ('log_odds', 'resolution')}
+        return grid, extra

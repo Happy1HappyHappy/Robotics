@@ -11,6 +11,7 @@ START_COLOR = (0, 160, 0)       # BGR: green
 PATH_COLOR = (255, 0, 0)        # blue
 SENSOR_COLOR = (0, 0, 255)      # red
 TEXT_COLOR = (0, 0, 0)          # black
+SEGMENT_COLOR = (0, 140, 255)   # orange
 
 
 def world_to_pixel(grid, x, y, scale):
@@ -55,6 +56,24 @@ def grid_image(grid, scale=3, poses=(), label=''):
     if label:
         cv2.putText(img, label, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, TEXT_COLOR, 1,
                     cv2.LINE_AA)
+    return img
+
+
+def map_image(grid, scale=3, poses=(), segments=(), corners=(), label=''):
+    """
+    The grid image (see grid_image) with wall segments (orange) and corner landmarks (red
+    circles, L1, L2, ...) on top
+    segments: [(start, end), ...] and corners: K x 2, world (x, y) in meters
+    """
+    img = grid_image(grid, scale, poses, label)
+    for start, end in segments:
+        cv2.line(img, world_to_pixel(grid, *start, scale), world_to_pixel(grid, *end, scale),
+                 SEGMENT_COLOR, 2)
+    for k, (x, y) in enumerate(corners, 1):
+        u, v = world_to_pixel(grid, x, y, scale)
+        cv2.circle(img, (u, v), 6, SENSOR_COLOR, 2)
+        cv2.putText(img, f'L{k}', (u + 7, v - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.45, SENSOR_COLOR,
+                    1, cv2.LINE_AA)
     return img
 
 

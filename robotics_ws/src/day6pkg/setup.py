@@ -13,6 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,7 +28,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'mapper = day6pkg.mapper:main',
+            'grid_node = day6pkg.grid_node:main',
+            'landmark_node = day6pkg.landmark_node:main',
+            'viewer_node = day6pkg.viewer_node:main',
         ],
     },
 )

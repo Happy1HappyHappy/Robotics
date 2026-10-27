@@ -1,0 +1,49 @@
+# Project 7 parameters for the Grid Node, the Landmark Node and the Viewer Node
+# Used by launch/project7_launch.py; output_dir comes from its run argument (run_a, run_b)
+# The Grid Node and the Landmark Node only compute and publish; the Viewer Node draws
+grid_node:
+  ros__parameters:
+    # ----- grid -----
+    size: 300                                   # cells per side (300 x 5 cm = 15 m)
+    resolution: 0.05                            # m, cell side
+
+    # ----- when to update -----
+    update_distance: 0.1                        # m traveled between grid updates
+    distance_tolerance: 0.03                    # m, stopping this short counts as reached
+    stopped_speed: 0.005                        # m/s, slower counts as stopped
+    max_odom_age: 0.5                           # s, skip scans if odom is older
+
+    # ----- LiDAR mounting -----
+    use_tf: true                                # read the LiDAR mounting from /tf_static
+    mount_yaw: 90.0                             # deg, LiDAR yaw, used only if use_tf is false
+
+    # ----- output -----
+    grid_frame: world                           # frame_id of /grid and /grid_path
+    save_grid: true                             # save the grid as grid.npz on shutdown
+
+landmark_node:
+  ros__parameters:
+    # ----- RANSAC (Day 7 slide 45) -----
+    occupied: 1.0                               # log-odds above which a cell is a point
+    sample_radius: 0.5                          # m, the two random points are this near
+    inlier_distance: 0.06                       # m, how close to a line is on it
+    min_points: 8                               # points needed for a segment
+    min_length: 0.3                             # m, shortest segment kept
+    max_gap: 0.15                               # m, a wider gap splits a segment
+    trials: 2000                                # RANSAC tries per line
+
+    # ----- corners (Day 7 slide 48) -----
+    corner_angle: 60.0                          # deg, segments must cross at least this
+    corner_distance: 0.15                       # m, segment ends this near the crossing
+
+    # ----- output -----
+    period: 1.0                                 # s, how often to look for a new grid
+    save: true                                  # save landmarks.npz on shutdown
+
+viewer_node:
+  ros__parameters:
+    snapshot_distances: [0.0, 1.0, 2.0, 3.0]    # m, save an image at each
+    distance_tolerance: 0.03                    # m, stopping this short counts as reached
+    image_scale: 3                              # image pixels per cell side
+    display: true                               # show the image in a window
+    save_images: true                           # save the snapshots and grid_final.png

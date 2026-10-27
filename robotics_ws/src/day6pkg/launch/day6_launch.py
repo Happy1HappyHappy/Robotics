@@ -1,5 +1,6 @@
 """
-Launch file for the day6pkg package: the Grid Node plus day3pkg's Driving and Executive nodes
+Launch file for the day6pkg package (Project 6): the Grid Node and the Viewer Node, plus
+day3pkg's Driving and Executive nodes
 """
 
 import os
@@ -18,10 +19,18 @@ def generate_launch_description():
     """
     ld = LaunchDescription()
 
-    mapper = Node(
+    grid = Node(
         package='day6pkg',
-        executable='mapper',
+        executable='grid_node',
         name='grid_node',
+        output='screen',
+    )
+
+    # draws the grid the Grid Node publishes: the window and the snapshot images
+    viewer = Node(
+        package='day6pkg',
+        executable='viewer_node',
+        name='viewer_node',
         output='screen',
     )
 
@@ -31,6 +40,7 @@ def generate_launch_description():
         os.path.join(get_package_share_directory('day3pkg'), 'launch', 'day3_launch.py')))
 
     # add_action adds a node (or an included launch file) to the launch process
-    ld.add_action(mapper)
+    ld.add_action(grid)
+    ld.add_action(viewer)
     ld.add_action(day3)
     return ld

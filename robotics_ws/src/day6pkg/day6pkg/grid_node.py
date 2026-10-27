@@ -1,22 +1,29 @@
 """
-Grid node for the day6pkg package (Project 6)
+Grid node for the day6pkg package (Projects 6 and 7)
 Builds an occupancy grid from the LiDAR (/scan), placing each scan with odometry (/odom)
 and the LiDAR's mounting on the robot (TF)
 Task 1: the first scan is added with the sensor at the origin
-Task 2: as the robot drives, a scan is added after every update_distance of travel, and the
-grid is saved as an image at each snapshot distance (by default 0, 0.5 and 1.0 m)
+Task 2: as the robot drives, a scan is added after every update_distance of travel
+After every update it publishes the grid (/grid) and the sensor's path so far (/grid_path)
+for the nodes that use them (the Landmark Node, the Viewer Node, later path planning); it
+draws nothing itself. On shutdown it saves the grid as grid.npz (save_grid)
 This node never moves the robot; drive it with day3pkg or the robot's drive_distance action
 """
 
+import array
 import math
 import os
 
-import cv2
+from geometry_msgs.msg import PoseStamped       # one pose of the path
+from nav_msgs.msg import OccupancyGrid as GridMsg   # for publishing the grid (/grid)
 from nav_msgs.msg import Odometry           # for the robot's odometry(/odom)
+from nav_msgs.msg import Path                   # for publishing the path (/grid_path)
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+# /grid keeps its latest message for nodes that subscribe later (transient local)
+from rclpy.qos import DurabilityPolicy, QoSProfile
 # Quality of Service profile for sensor data, with a queue depth of 5 and best effort reliability
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
@@ -26,10 +33,7 @@ from tf2_ros.buffer import Buffer
 # for the LiDAR's mounting on the robot (TF)
 from tf2_ros.transform_listener import TransformListener
 
-from day6pkg.grid import OccupancyGrid
-from day6pkg.render import grid_image, summary_image
-
-WINDOW = 'Occupancy grid'
+from day6pkg.occupancy_grid import OccupancyGrid
 
 
 def yaw_from_quaternion(q):
@@ -68,19 +72,20 @@ class GridNode(Node):
         self.declare_parameter('size', 200)                 # cells per side
         self.declare_parameter('resolution', 0.05)          # m, cell side
         self.declare_parameter('update_distance', 0.1)      # m traveled between grid updates
-        self.declare_parameter('snapshot_distances', [0.0, 0.5, 1.0])  # m, save an image at each
         self.declare_parameter('distance_tolerance', 0.03)  # m, stopping this short counts
         self.declare_parameter('stopped_speed', 0.005)      # m/s, slower counts as stopped
         self.declare_parameter('max_odom_age', 0.5)         # s, skip scans if odom is older
         self.declare_parameter('use_tf', True)              # LiDAR mounting from TF
         self.declare_parameter('mount_yaw', 90.0)           # deg, LiDAR yaw if use_tf is false
-        self.declare_parameter('output_dir', '.')           # where the images are saved
-        self.declare_parameter('display', True)             # show the grid in a window
-        self.declare_parameter('image_scale', 3)            # image pixels per cell side
+        self.declare_parameter('grid_frame', 'world')       # frame_id of /grid and /grid_path
+        self.declare_parameter('save_grid', True)           # save the grid as grid.npz on shutdown
+        self.declare_parameter('output_dir', '.')           # where grid.npz is saved
 
         self.grid_ = OccupancyGrid(self.get_parameter('size').value,
                                    self.get_parameter('resolution').value)
-        self.scale_ = self.get_parameter('image_scale').value
+        self.save_grid_ = self.get_parameter('save_grid').value
+        if self.save_grid_:
+            os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
 
         # the LiDAR's mounting comes from the robot's static transforms (/tf_static)
         self.tf_buffer_ = Buffer()  # store the transforms, so they can be looked up later
@@ -96,21 +101,15 @@ class GridNode(Node):
         self.start_xy_ = None           # robot position (x, y) at the first update, odom frame
         self.next_update_ = 0.0         # m of travel at which the next scan is added
         self.poses_ = []                # (sensor x, y, robot heading) per update, world frame
-        self.snapshots_ = {}            # snapshot distance (m) -> image
-        self.image_ = None              # latest grid image
-        self.window_open_ = False
 
         self.odom_sub_ = self.create_subscription(
             Odometry, 'odom', self.odom_callback, qos_profile_sensor_data)
         self.scan_sub_ = self.create_subscription(
             LaserScan, 'scan', self.scan_callback, qos_profile_sensor_data)
-
-        self.display_timer_ = None
-        if self.get_parameter('display').value:
-            if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
-                self.display_timer_ = self.create_timer(0.1, self.display_callback)
-            else:
-                self.get_logger().warn('No display found; images are only saved to files')
+        # both keep their latest message, so a node started later still gets it at once
+        latest = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.grid_pub_ = self.create_publisher(GridMsg, 'grid', latest)
+        self.path_pub_ = self.create_publisher(Path, 'grid_path', latest)
         self.get_logger().info('Grid Node ready, waiting for /scan and /odom')
 
     # ---------- odometry ----------
@@ -200,67 +199,66 @@ class GridNode(Node):
             f'Update {len(self.poses_)}: traveled {traveled:.3f} m, sensor at '
             f'x={pose[0]:.3f} m, y={pose[1]:.3f} m, robot heading '
             f'{math.degrees(heading):.1f} deg, {used} of {len(msg.ranges)} rays used')
-        self.image_ = grid_image(self.grid_, self.scale_, self.poses_,
-                                 f'{traveled:.2f} m traveled, {len(self.poses_)} scans')
-        self.save_snapshots(traveled)
+        stamp = self.get_clock().now().to_msg()
+        self.publish_path(stamp)        # path first: a viewer drawing the grid has its path
+        self.publish_grid(stamp)
 
-    # ---------- images ----------
-    def save_snapshots(self, traveled):
+    # ---------- publishing ----------
+    def publish_grid(self, stamp):
         """
-        Save the grid image for each snapshot distance just reached, then the summary
-        image with all snapshots so far side by side
+        Publish the grid on /grid as a nav_msgs/OccupancyGrid in the world frame
+        (occupancy in percent, -1 unknown; see OccupancyGrid.ros_layout)
         """
-        tolerance = self.get_parameter('distance_tolerance').value
-        distances = self.get_parameter('snapshot_distances').value
-        reached = [d for d in distances if d not in self.snapshots_ and traveled >= d - tolerance]
-        if not reached:
-            return
-        for d in reached:
-            self.snapshots_[d] = self.image_
-            self.save_image(f'grid_{d:.2f}m.png', self.image_)
-        self.save_image('grid_summary.png',
-                        summary_image([self.snapshots_[d] for d in sorted(self.snapshots_)]))
-        if len(self.snapshots_) == len(distances):
-            self.get_logger().info('All snapshots saved')
+        values, (x0, y0) = self.grid_.ros_layout()
+        msg = GridMsg()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.get_parameter('grid_frame').value
+        msg.info.resolution = float(self.grid_.resolution)
+        msg.info.width = msg.info.height = self.grid_.size
+        msg.info.origin.position.x, msg.info.origin.position.y = x0, y0
+        msg.info.origin.orientation.w = 1.0
+        msg.data = array.array('b', values.tobytes())
+        self.grid_pub_.publish(msg)
 
-    def save_image(self, name, img):
+    def publish_path(self, stamp):
         """
-        Write an image to output_dir, logging the path or the failure
+        Publish the pose of every update so far on /grid_path as a nav_msgs/Path in the world
+        frame: the sensor's position with the robot's heading
         """
-        path = os.path.join(self.get_parameter('output_dir').value, name)
-        if cv2.imwrite(path, img):
-            self.get_logger().info(f'Saved {path}')
-        else:
-            self.get_logger().warn(f'Could not save {path}')
+        msg = Path()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.get_parameter('grid_frame').value
+        for x, y, heading in self.poses_:
+            pose = PoseStamped()
+            pose.header = msg.header
+            pose.pose.position.x, pose.pose.position.y = x, y
+            pose.pose.orientation.z = math.sin(heading / 2.0)     # rotation about z only
+            pose.pose.orientation.w = math.cos(heading / 2.0)
+            msg.poses.append(pose)
+        self.path_pub_.publish(msg)
 
+    # ---------- saving ----------
     def save_final(self):
         """
-        Save the grid as it is now, so the last state is kept even if a snapshot distance
-        was never reached
+        Save the grid as it is now as grid.npz (if save_grid), with the poses and
+        ^world T_odom, so two runs can be compared later
         """
-        if self.image_ is not None:
-            self.save_image('grid_final.png', self.image_)
-
-    def display_callback(self):
-        """
-        Show the latest grid image; cv2.waitKey lets the window draw itself
-        """
-        if self.image_ is None:
+        if not self.poses_ or not self.save_grid_:      # no update yet, or not wanted
             return
+        path = os.path.join(self.get_parameter('output_dir').value, 'grid.npz')
         try:
-            cv2.imshow(WINDOW, self.image_)
-            cv2.waitKey(1)
-            self.window_open_ = True
-        except cv2.error as e:
-            self.get_logger().warn(f'Cannot show the grid ({e}); images are still saved')
-            self.display_timer_.cancel()
+            self.grid_.save(path, poses=np.array(self.poses_),
+                            world_from_odom=self.world_from_odom_)
+            self.get_logger().info(f'Saved {path}')
+        except OSError as e:
+            self.get_logger().warn(f'Could not save {path}: {e}')
 
 
 def main(args=None):
     """
     Entry point for the grid node
     Initializes the ROS 2 system, creates the node, and spins it
-    Saves the final grid and closes the window on shutdown
+    Saves the grid on shutdown
     """
     rclpy.init(args=args)
     node = GridNode()
@@ -270,8 +268,6 @@ def main(args=None):
         pass
     finally:
         node.save_final()
-        if node.window_open_:
-            cv2.destroyAllWindows()
         node.destroy_node()
         rclpy.try_shutdown()
 

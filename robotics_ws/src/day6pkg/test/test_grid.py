@@ -4,9 +4,10 @@ Tests of the occupancy grid (no ROS, no robot): python3 -m pytest test/test_grid
 
 import math
 
+import numpy as np
 import pytest
 
-from day6pkg.grid import bresenham, log_odds, OccupancyGrid
+from day6pkg.occupancy_grid import bresenham, log_odds, OccupancyGrid
 
 
 @pytest.mark.parametrize('end', [(5, 2), (2, 5), (-5, 2), (2, -5), (-3, -3), (0, 4), (4, 0)])
@@ -77,3 +78,37 @@ def test_log_odds_are_clamped():
     assert g.log_odds.max() == pytest.approx(2.0)
     assert g.log_odds.min() == pytest.approx(-2.0)
     assert g.probability().max() == pytest.approx(1.0 - 1.0 / 101.0)
+
+
+def test_save_and_load_keep_the_grid_and_the_extra_arrays(tmp_path):
+    g = OccupancyGrid(20, 0.05)
+    g.log_odds[3, 4] = 2.5
+    poses = np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]])
+    g.save(tmp_path / 'grid.npz', poses=poses, world_from_odom=np.eye(3))
+    loaded, extra = OccupancyGrid.load(tmp_path / 'grid.npz')
+    assert loaded.size == 20 and loaded.resolution == 0.05
+    assert np.array_equal(loaded.log_odds, g.log_odds)
+    assert np.array_equal(extra['poses'], poses)
+    assert np.array_equal(extra['world_from_odom'], np.eye(3))
+
+
+@pytest.mark.parametrize('size', [300, 5])
+def test_ros_layout_puts_each_cell_at_its_world_position(size):
+    g = OccupancyGrid(size, 0.05)
+    g.log_odds[g.world_to_cell(0.06, -0.03)] = 3.0
+    values, (x0, y0) = g.ros_layout()
+    assert values.dtype == np.int8 and values.shape == (size, size)
+    assert (values == -1).sum() == size * size - 1      # everything else unknown
+    j, i = np.argwhere(values == 100)[0]                # ROS: data[j * width + i]
+    assert x0 + (i + 0.5) * 0.05 == pytest.approx(0.075)    # center of the cell holding x
+    assert y0 + (j + 0.5) * 0.05 == pytest.approx(-0.025)
+
+
+def test_ros_layout_round_trip_keeps_the_occupied_threshold():
+    g = OccupancyGrid(10, 0.05)
+    g.log_odds[2, 3], g.log_odds[4, 5], g.log_odds[6, 7] = 0.954, 1.908, -3.0
+    values, _ = g.ros_layout()
+    back = OccupancyGrid.from_ros_layout(values.ravel().tolist(), 0.05)
+    assert back.size == 10 and back.log_odds[0, 0] == 0.0      # unknown stays 0
+    assert back.log_odds[2, 3] < 1.0 < back.log_odds[4, 5]     # one hit vs two hits
+    assert back.log_odds[6, 7] == pytest.approx(-3.0)
