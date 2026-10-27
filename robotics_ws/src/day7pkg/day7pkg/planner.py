@@ -1,7 +1,7 @@
 """
-Path planning on an occupancy grid with A* (Project 7, Task 3; Day 7 slides 16-26): grow
-the obstacles by the robot's radius, search the free cells with A*, then shorten the path to
-straight legs between the farthest cells it can reach without hitting anything
+Path planning on an occupancy grid with A* (Project 7, Task 3): grow the obstacles by the
+robot's radius, search the free cells with A*, then shorten the path to straight legs
+between the farthest cells it can reach without hitting anything
 Pure NumPy and OpenCV (no ROS), so it can be tested and used without the robot
 Cells are (row, col) as in day6pkg's OccupancyGrid; points are world (x, y) in meters
 """
@@ -15,7 +15,7 @@ import numpy as np
 
 from day6pkg.grid import bresenham
 
-# (row step, col step, cost): sides cost 1 cell, diagonals sqrt(2) (the slides round it to 1.5)
+# (row step, col step, cost): a side step costs 1 cell, a diagonal sqrt(2) (its true length)
 NEIGHBORS = [(-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
              (-1, -1, math.sqrt(2.0)), (-1, 1, math.sqrt(2.0)),
              (1, -1, math.sqrt(2.0)), (1, 1, math.sqrt(2.0))]
@@ -26,7 +26,7 @@ def blocked_cells(log_odds, resolution, inflate, occupied=0.5, free=-0.5):
     Cells the robot's center must not enter (True = blocked)
     A cell is blocked if it is not known to be free (log-odds above free, so cells never seen
     count as blocked), or if it is within inflate meters of an occupied cell (log-odds above
-    occupied): growing the obstacles by the robot's radius lets A* plan for a point (slide 25)
+    occupied): growing the obstacles by the robot's radius lets A* treat the robot as a point
     """
     obstacle = log_odds > occupied
     # distance, in cells, from every cell to the nearest obstacle cell (0 on obstacles)
@@ -39,7 +39,7 @@ def astar(blocked, start, goal):
     """
     Shortest path of unblocked cells from start to goal (row, col), 8-connected, with A*:
     Dijkstra's search, but taking cells off the open list in order of f = g + h, where g is
-    the cost from the start and h the straight-line distance to the goal (slides 19-23)
+    the cost from the start and h the straight-line distance to the goal
     h never overestimates the remaining cost, so the path found is a shortest one
     A diagonal step may not cut the corner of a blocked cell
     Returns (cells from start to goal, number of cells expanded), or (None, expanded) if the
@@ -95,7 +95,7 @@ def line_of_sight(blocked, a, b):
 def shorten(blocked, path):
     """
     Waypoints along path (cells): from each waypoint, go straight to the farthest later cell
-    of the path that can be reached without crossing a blocked cell (slide 24)
+    of the path that can be reached without crossing a blocked cell
     The first and last cells of the path are always waypoints
     """
     waypoints = [path[0]]

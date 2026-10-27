@@ -95,6 +95,8 @@ def main(argv=None):
     args = parse_args(argv)
     grid, extra = OccupancyGrid.load(args.grid)
     poses = [tuple(p) for p in extra.get('poses', [])]
+    # default start: run A's first sensor position, the grid's origin; after run B the
+    # robot is back there, facing the other way (poses[-1] is where run A ended)
     start = tuple(args.start) if args.start else (poses[0][:2] if poses else (0.0, 0.0))
     inflate = args.robot_radius + args.margin
     try:

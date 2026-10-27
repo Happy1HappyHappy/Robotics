@@ -4,7 +4,7 @@ RANSAC, corners where two segments meet, and the rigid transform that lines up t
 of two grids
 Pure NumPy (no ROS), so it can be tested and used without the robot
 Points and transforms are in meters and radians; a transform (x, y, theta) maps a point p
-of one frame to R(theta) p + (x, y) in the other, like ^A T_B in the slides
+of one frame to R(theta) p + (x, y) in the other, as ^A T_B maps points of B into A
 """
 
 from dataclasses import dataclass
@@ -69,6 +69,7 @@ def _run_around(t, t0, max_gap):
     """
     order = np.argsort(t)
     ts = t[order]
+    # find the index of the value closest to t0, then expand outwards until a gap is too big
     k = int(np.argmin(np.abs(ts - t0)))
     if abs(ts[k] - t0) > max_gap:
         return np.array([], dtype=int)
@@ -86,19 +87,24 @@ def _points_on_segment(points, origin, direction, inlier_distance, max_gap):
     keeping only the unbroken run of them around origin (a gap of more than max_gap along
     the line separates two segments of the same line, e.g. two walls on either side of a door)
     """
+    # direction is a unit vector, so the distance from a point p to the line
+    # is |(p - origin) x direction|
     d = direction / np.linalg.norm(direction)
     normal = np.array([-d[1], d[0]])
+    # list of vectors relative to the origin
     rel = points - origin
+    # get the indices of the points that are within inlier_distance of the line
     on = np.nonzero(np.abs(rel @ normal) <= inlier_distance)[0]
     if len(on) == 0:
         return on
+    # sort the points along the line and find the unbroken run of them around the origin
     return on[_run_around(rel[on] @ d, 0.0, max_gap)]
 
 
 def ransac_segments(points, sample_radius=0.5, inlier_distance=0.05, min_points=8,
                     min_length=0.3, max_gap=0.15, max_failures=300, seed=0):
     """
-    Line segments in points (N x 2, meters), found one at a time by RANSAC (Day 7 slides 42-45):
+    Line segments in points (N x 2, meters), found one at a time by RANSAC:
     pick a random point and a random other point within sample_radius of it, take the line
     through them, and collect the unbroken run of points within inlier_distance of it; if
     the run has at least min_points, refit the line to them (least squares), collect the run
@@ -107,14 +113,18 @@ def ransac_segments(points, sample_radius=0.5, inlier_distance=0.05, min_points=
     seed makes the random choices repeatable, so the same grid gives the same segments
     Returns the segments in the order found
     """
+    # random number generator for repeatable results
     rng = np.random.default_rng(seed)
+    # remaining points to find segments in
     remaining = np.asarray(points, dtype=float)
     segments = []
     failures = 0
     while failures < max_failures and len(remaining) >= min_points:
         failures += 1
         i = rng.integers(len(remaining))
+        # calculate distances from remaining[i] to all the other points
         d = np.linalg.norm(remaining - remaining[i], axis=1)
+        # find the indices of the points within sample_radius of it, excluding itself
         near = np.nonzero((d > 0.0) & (d <= sample_radius))[0]
         if len(near) == 0:
             continue
@@ -128,6 +138,7 @@ def ransac_segments(points, sample_radius=0.5, inlier_distance=0.05, min_points=
         members = _points_on_segment(remaining, center, direction, inlier_distance, max_gap)
         if len(members) < min_points:
             continue
+        # check that the segment is long enough
         center, direction = fit_line(remaining[members])
         t = (remaining[members] - center) @ direction
         if t.max() - t.min() < min_length:
@@ -141,9 +152,9 @@ def ransac_segments(points, sample_radius=0.5, inlier_distance=0.05, min_points=
 
 def find_corners(segments, min_angle=math.radians(60.0), max_distance=0.15):
     """
-    Corners where two segments meet (Day 7 slide 48): the intersection of the two lines, kept
-    if the lines cross at min_angle or more and each segment ends within max_distance of the
-    intersection, so the data runs up to the corner on both sides
+    Corners where two segments meet: the intersection of the two lines, kept if the lines
+    cross at min_angle or more and each segment ends within max_distance of the intersection,
+    so the data runs up to the corner on both sides
     Corners closer together than max_distance are merged into their average
     Returns an N x 2 array of corners (meters), sorted by x then y so the labels are repeatable
     """
@@ -160,6 +171,7 @@ def find_corners(segments, min_angle=math.radians(60.0), max_distance=0.15):
                 min(np.linalg.norm(p - b.start), np.linalg.norm(p - b.end)) <= max_distance):
             found.append(p)
 
+    # merge corners that are too close together
     clusters = []       # [sum of points, count]
     for p in found:
         for cluster in clusters:
@@ -260,6 +272,7 @@ def align(a, b, max_distance=0.3, angle_step=math.radians(1.0), prior=None,
     b = np.asarray(b, dtype=float).reshape(-1, 2)
     angles = np.arange(0.0, 2.0 * math.pi, angle_step)
     c, s = np.cos(angles), np.sin(angles)
+    # if prior is given, only keep the angles within prior_angle of it
     if prior is not None:
         keep = np.abs([wrap_angle(t - prior[2]) for t in angles]) <= prior_angle
         angles, c, s = angles[keep], c[keep], s[keep]

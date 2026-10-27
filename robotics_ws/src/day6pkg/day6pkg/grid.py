@@ -10,7 +10,7 @@ import numpy as np
 
 def log_odds(p):
     """
-    Base-10 log-odds of probability p, as in the slides: L = log10(p / (1 - p))
+    Base-10 log-odds of probability p: L = log10(p / (1 - p))
     """
     return math.log10(p / (1.0 - p))
 

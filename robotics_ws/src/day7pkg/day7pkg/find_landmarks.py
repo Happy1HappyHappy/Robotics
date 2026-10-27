@@ -167,8 +167,8 @@ def main(argv=None):
     """
     Entry point: find, line up and compare the landmarks, then write the images and report
     """
-    args = parse_args(argv)
-    runs = []
+    args = parse_args(argv)     # ArgumentParser handles args
+    runs = []                   # (grid, poses, points, segments, corners, world_from_odom) per run
     for path in (args.grid_a, args.grid_b):
         grid, poses, world_from_odom = load(path)
         points, segments, corners = landmarks(grid, args)
