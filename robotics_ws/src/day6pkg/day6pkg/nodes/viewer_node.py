@@ -24,8 +24,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker               # the wall segments (/wall_segments)
 
-from day6pkg.occupancy_grid import OccupancyGrid
-from day6pkg.render import map_image, summary_image
+from day6pkg.helpers.occupancy_grid import OccupancyGrid
+from day6pkg.helpers.render import map_image, summary_image
 
 WINDOW = 'Occupancy grid'
 

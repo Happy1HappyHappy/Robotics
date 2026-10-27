@@ -33,7 +33,7 @@ from tf2_ros.buffer import Buffer
 # for the LiDAR's mounting on the robot (TF)
 from tf2_ros.transform_listener import TransformListener
 
-from day6pkg.occupancy_grid import OccupancyGrid
+from day6pkg.helpers.occupancy_grid import OccupancyGrid
 
 
 def yaw_from_quaternion(q):
