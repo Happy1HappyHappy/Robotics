@@ -28,9 +28,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'grid_node = day6pkg.grid_node:main',
-            'landmark_node = day6pkg.landmark_node:main',
-            'viewer_node = day6pkg.viewer_node:main',
+            'grid_node = day6pkg.nodes.grid_node:main',
+            'landmark_node = day6pkg.nodes.landmark_node:main',
+            'viewer_node = day6pkg.nodes.viewer_node:main',
         ],
     },
 )

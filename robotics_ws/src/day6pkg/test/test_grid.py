@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from day6pkg.occupancy_grid import bresenham, log_odds, OccupancyGrid
+from day6pkg.helpers.occupancy_grid import bresenham, log_odds, OccupancyGrid
 
 
 @pytest.mark.parametrize('end', [(5, 2), (2, 5), (-5, 2), (2, -5), (-3, -3), (0, 4), (4, 0)])

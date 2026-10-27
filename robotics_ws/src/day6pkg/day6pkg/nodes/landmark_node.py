@@ -1,7 +1,7 @@
 """
 Landmark node for the day6pkg package (Project 7, Task 2)
 Finds corner landmarks in the grid the Grid Node publishes (/grid), every time it changes:
-wall segments by RANSAC, then corners where two segments meet (see landmarks.py)
+wall segments by RANSAC, then corners where two segments meet (see helpers/landmarks.py)
 Publishes the corners on /landmarks (geometry_msgs/PoseArray) and the wall segments on
 /wall_segments (visualization_msgs/Marker, a line list), both in the grid's frame, for the
 nodes that use them (the Viewer Node, later localization); it draws nothing itself
@@ -23,8 +23,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker               # for the wall segments (/wall_segments)
 
-from day6pkg.occupancy_grid import OccupancyGrid
-from day6pkg.landmarks import find_corners, find_segments, occupied_points
+from day6pkg.helpers.occupancy_grid import OccupancyGrid
+from day6pkg.helpers.landmarks import find_corners, find_segments, occupied_points
 
 
 class LandmarkNode(Node):

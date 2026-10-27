@@ -1,12 +1,26 @@
 # day6pkg
 
-ROS 2 package for CS 5335 Projects 6 and 7. The **Grid Node** (`grid_node.py`) builds an
-occupancy grid from the TurtleBot's LiDAR: it reads `/scan`, places each scan using `/odom`
-and the LiDAR's mounting on the robot (from TF), and publishes the grid. The **Landmark
-Node** (Project 7) finds corner landmarks in it. Both only compute and publish, for any
-node that needs their data (later, to decide where to drive); the **Viewer Node** is the
-only one that draws. The grid itself is in `occupancy_grid.py`, the landmark search in
-`landmarks.py` and the drawing in `render.py`.
+ROS 2 package for CS 5335 Projects 6 and 7. The **Grid Node** builds an occupancy grid
+from the TurtleBot's LiDAR: it reads `/scan`, places each scan using `/odom` and the
+LiDAR's mounting on the robot (from TF), and publishes the grid. The **Landmark Node**
+(Project 7) finds corner landmarks in it. Both only compute and publish, for any node that
+needs their data (later, to decide where to drive); the **Viewer Node** is the only one
+that draws.
+
+The nodes are in `nodes/`; what they use, without ROS (so it can be tested on its own),
+is in `helpers/`:
+
+```
+day6pkg/
+├── nodes/                   ROS 2 nodes: subscribe, publish, save
+│   ├── grid_node.py         Grid Node        (ros2 run day6pkg grid_node)
+│   ├── landmark_node.py     Landmark Node    (ros2 run day6pkg landmark_node)
+│   └── viewer_node.py       Viewer Node      (ros2 run day6pkg viewer_node)
+└── helpers/                 no ROS
+    ├── occupancy_grid.py    the grid: log-odds cells, ray casting, saving and loading
+    ├── landmarks.py         RANSAC wall segments and corner landmarks
+    └── render.py            drawing the grid, the path and the landmarks
+```
 
 ```
  /scan       LaserScan ──┐                  /grid ──────┬──────────────> Viewer Node ──> window
@@ -26,6 +40,44 @@ starts the Grid Node and the Viewer Node together with `day3pkg`'s Driving and E
 nodes; `launch/project7_launch.py` starts the three nodes here (see
 [Project 7](#project-7-landmarks-while-driving)).
 
+## Nodes and topics
+
+The robot publishes `/scan`, `/odom` and `/tf_static` on its own. Everything else comes from
+the three nodes of this package:
+
+| Node | Subscribes to | Publishes | Saves on Ctrl-C |
+| --- | --- | --- | --- |
+| Grid Node (`grid_node`) | `/scan`, `/odom`, `/tf_static` | `/grid`, `/grid_path` | `grid.npz` (`save_grid`) |
+| Landmark Node (`landmark_node`) | `/grid` | `/landmarks`, `/wall_segments` | `landmarks.npz` (`save`) |
+| Viewer Node (`viewer_node`) | `/grid`, `/grid_path`, `/landmarks`, `/wall_segments` | nothing | `grid_*.png`, `grid_summary.png`, `grid_final.png` (`save_images`) |
+
+| Topic | From | To | Type | When |
+| --- | --- | --- | --- | --- |
+| `/scan` | robot (LiDAR) | Grid Node | `sensor_msgs/LaserScan` | Every LiDAR turn |
+| `/odom` | robot (base) | Grid Node | `nav_msgs/Odometry` | Every odometry update |
+| `/tf_static` | robot | Grid Node (looked up once) | TF | Once, at start-up |
+| `/grid` | Grid Node | Landmark Node, Viewer Node | `nav_msgs/OccupancyGrid` | Every grid update (every 0.1 m) |
+| `/grid_path` | Grid Node | Viewer Node | `nav_msgs/Path` | Every grid update, stamped like `/grid` |
+| `/landmarks` | Landmark Node | Viewer Node | `geometry_msgs/PoseArray` | At most once per `period` (1 s), for a new grid |
+| `/wall_segments` | Landmark Node | Viewer Node | `visualization_msgs/Marker` | With `/landmarks`, stamped alike |
+
+The four topics of this package are in the grid's frame (`world`: the sensor's position and
+the robot's heading at the Grid Node's first update) and keep their latest message
+(transient local, depth 1), so a node started later gets each of them at once. What they
+hold:
+
+| Topic | Contents |
+| --- | --- |
+| `/grid` | `info`: `resolution` (0.05 m), `width` = `height` (cells per side), `origin` (the outer corner of the first cell, e.g. (−7.5, −7.5) m for 300 cells). `data`: one value per cell, occupancy in percent (0 to 100, −1 unknown), row by row from the −x, −y corner: cell (i, j) is `data[j * width + i]`, centered at `origin + ((i + 0.5), (j + 0.5)) * resolution` |
+| `/grid_path` | `poses`: one per grid update so far, oldest first: the sensor's position (x, y) and the robot's heading (rotation about z) |
+| `/landmarks` | `poses`: one per corner landmark, position (x, y) only, sorted by x then y (`L1`, `L2`, ... in the images); stamped like the grid they were found in |
+| `/wall_segments` | A `LINE_LIST` marker: `points` holds two points per wall segment (start, end); width and color are for RViz |
+
+The robot's topics, as the Grid Node uses them: from `/scan` the `ranges` with
+`angle_min`, `angle_increment`, `range_min`, `range_max` and the sensor's `frame_id`; from
+`/odom` the position, heading, forward speed and `child_frame_id`; from `/tf_static` the
+LiDAR's mounting, `base_link` → `rplidar_link`.
+
 ## The grid
 
 | | |
@@ -39,7 +91,7 @@ nodes; `launch/project7_launch.py` starts the three nodes here (see
 | Limits | `L` is clamped to ±3, so a cell can change state again later |
 
 For each scan, every ray with a valid range is cast from the sensor's cell to the cell
-where it ends, with Bresenham's line algorithm (`occupancy_grid.py`). Ranges outside
+where it ends, with Bresenham's line algorithm (`helpers/occupancy_grid.py`). Ranges outside
 `[range_min, range_max]`, `inf` and `nan` are skipped. Each cell is updated at most once
 per scan, and if any ray ends in a cell, that cell counts as occupied for the scan.
 
@@ -168,10 +220,9 @@ Update 2: traveled 0.101 m, sensor at x=0.101 m, y=0.000 m, robot heading 0.0 de
 Update 11: traveled 1.002 m, sensor at x=1.002 m, y=0.001 m, robot heading 0.0 deg, 1041 of 1080 rays used
 ```
 
-After every update the Grid Node publishes the grid on `/grid` (`nav_msgs/OccupancyGrid`,
-occupancy in percent, -1 unknown) and the pose of every update so far on `/grid_path`
-(`nav_msgs/Path`). Both keep their latest message, so a node started later gets them at
-once. Files saved in the directory each node was started from (or its `output_dir`):
+After every update the Grid Node publishes `/grid` and `/grid_path` (see
+[Nodes and topics](#nodes-and-topics)). Files saved in the directory each node was started
+from (or its `output_dir`):
 
 | File | Saved by | Contents |
 | --- | --- | --- |
@@ -214,6 +265,23 @@ Grid Node (`grid_node`):
 | `save_grid` | `true` | Save the grid as `grid.npz` on Ctrl-C |
 | `output_dir` | `.` | Where `grid.npz` is saved (created if missing) |
 
+Landmark Node (`landmark_node`; Day 7 slides 45 and 48):
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `occupied` | `1.0` | Log-odds above which a cell is a point (at least two more hits than misses) |
+| `sample_radius` | `0.5` | The two random points of a RANSAC try are at most this far apart, m |
+| `inlier_distance` | `0.06` | A point this close to a line is on it, m |
+| `min_points` | `8` | Points a segment needs |
+| `min_length` | `0.3` | Shortest segment kept, m |
+| `max_gap` | `0.15` | A wider gap between points on a line splits it into segments, m |
+| `trials` | `2000` | RANSAC tries per line |
+| `corner_angle` | `60.0` | Two segments must cross at least at this angle to make a corner, degrees |
+| `corner_distance` | `0.15` | Both segments must end this near their crossing, m |
+| `period` | `1.0` | How often to look for a new grid, s |
+| `save` | `true` | Save `landmarks.npz` on Ctrl-C |
+| `output_dir` | `.` | Where `landmarks.npz` is saved (created if missing) |
+
 Viewer Node (`viewer_node`):
 
 | Parameter | Default | Meaning |
@@ -241,8 +309,8 @@ computed, published and saved, but nothing is drawn. `save_grid` (Grid Node), `s
 (Landmark Node) and `save_images` (Viewer Node) in the YAML file turn their files off
 (rebuild after changing it).
 
-The Landmark Node (`landmark_node.py`, algorithms in `landmarks.py`) looks for landmarks in
-every new `/grid`, once per `period`:
+The Landmark Node (`nodes/landmark_node.py`, algorithms in `helpers/landmarks.py`) looks for
+landmarks in every new `/grid`, once per `period`:
 
 1. Points: the centers of the cells with log-odds above `occupied` (1.0).
 2. Wall segments by RANSAC (Day 7 slides 42-45, with scikit-image's `ransac`): two random

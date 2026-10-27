@@ -6,8 +6,8 @@ The RANSAC tests need scikit-image and are skipped without it
 import numpy as np
 import pytest
 
-from day6pkg.occupancy_grid import OccupancyGrid
-from day6pkg.landmarks import find_corners, find_segments, occupied_points
+from day6pkg.helpers.occupancy_grid import OccupancyGrid
+from day6pkg.helpers.landmarks import find_corners, find_segments, occupied_points
 
 
 def wall(x0, y0, x1, y1, step=0.05):
