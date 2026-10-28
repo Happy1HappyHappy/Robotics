@@ -7,6 +7,8 @@ import math
 
 import numpy as np
 
+from day6pkg.helpers.files import save_npz
+
 
 def log_odds(p):
     """
@@ -146,9 +148,9 @@ class OccupancyGrid:
     def save(self, path, **extra):
         """
         Write the grid to path as a NumPy .npz file: log-odds, resolution, and any extra
-        arrays passed by name (e.g. poses=...)
+        arrays passed by name (e.g. poses=...); an older file at path is replaced whole
         """
-        np.savez(path, log_odds=self.log_odds, resolution=self.resolution, **extra)
+        save_npz(path, log_odds=self.log_odds, resolution=self.resolution, **extra)
 
     @classmethod
     def load(cls, path):

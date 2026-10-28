@@ -1,6 +1,8 @@
 """
 Launch file for the day6pkg package (Project 6): the Grid Node and the Viewer Node, plus
 day3pkg's Driving and Executive nodes
+Both nodes name their files after this run's start time (logs/<run>_grid.npz,
+result/grid/<run>_grid_*.png)
 """
 
 import os
@@ -10,6 +12,9 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
+from day6pkg.helpers.files import run_name
 
 
 def generate_launch_description():
@@ -18,12 +23,15 @@ def generate_launch_description():
     'ros2 launch' calls this function to get the launch description
     """
     ld = LaunchDescription()
+    # one name for both nodes' files, read as text even though it looks like a date
+    run = {'run_id': ParameterValue(run_name(), value_type=str)}
 
     grid = Node(
         package='day6pkg',
         executable='grid_node',
         name='grid_node',
         output='screen',
+        parameters=[run],
     )
 
     # draws the grid the Grid Node publishes: the window and the snapshot images
@@ -32,6 +40,7 @@ def generate_launch_description():
         executable='viewer_node',
         name='viewer_node',
         output='screen',
+        parameters=[run],
     )
 
     # day3pkg's own launch file: Driving Node + Executive in an xterm

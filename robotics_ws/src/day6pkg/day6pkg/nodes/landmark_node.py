@@ -5,7 +5,8 @@ wall segments by RANSAC, then corners where two segments meet (see helpers/landm
 Publishes the corners on /landmarks (geometry_msgs/PoseArray) and the wall segments on
 /wall_segments (visualization_msgs/Marker, a line list), both in the grid's frame, for the
 nodes that use them (the Viewer Node, later localization); it draws nothing itself
-On shutdown it saves the last ones as landmarks.npz (save)
+It saves the latest ones as <log_dir>/<run>_landmarks.npz every save_period seconds while
+they change, and on shutdown (save)
 This node never moves the robot
 """
 
@@ -23,8 +24,9 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker               # for the wall segments (/wall_segments)
 
-from day6pkg.helpers.occupancy_grid import OccupancyGrid
+from day6pkg.helpers.files import run_name, save_npz
 from day6pkg.helpers.landmarks import find_corners, find_segments, occupied_points
+from day6pkg.helpers.occupancy_grid import OccupancyGrid
 
 
 class LandmarkNode(Node):
@@ -46,16 +48,21 @@ class LandmarkNode(Node):
         self.declare_parameter('corner_angle', 60.0)        # deg, smallest angle between segments
         self.declare_parameter('corner_distance', 0.15)     # m, segment ends this near the corner
         self.declare_parameter('period', 1.0)               # s, how often to look for a new grid
-        self.declare_parameter('save', True)                # save landmarks.npz on shutdown
-        self.declare_parameter('output_dir', '.')           # where landmarks.npz is saved
+        self.declare_parameter('save', True)                # save <run>_landmarks.npz
+        self.declare_parameter('save_period', 10.0)         # s between saves; 0: on shutdown only
+        self.declare_parameter('log_dir', 'logs')           # where the .npz files are saved
+        self.declare_parameter('run_id', '')                # names the files; '' = start time
 
         self.save_ = self.get_parameter('save').value
+        log_dir = self.get_parameter('log_dir').value
+        self.npz_path_ = os.path.join(
+            log_dir, f'{run_name(self.get_parameter("run_id").value)}_landmarks.npz')
         if self.save_:
-            os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
+            os.makedirs(log_dir, exist_ok=True)
 
         self.grid_msg_ = None           # latest /grid message
         self.new_grid_ = False          # it has not been searched yet
-        self.searched_ = False          # a grid has been searched at least once
+        self.unsaved_ = False           # landmarks found since the last save
         self.frame_ = ''                # frame_id of the last grid searched
         self.resolution_ = 0.0          # m, its cell side
         self.segments_ = []             # its wall segments [(start, end), ...], m
@@ -67,7 +74,11 @@ class LandmarkNode(Node):
         self.segment_pub_ = self.create_publisher(Marker, 'wall_segments', latest)
         self.search_timer_ = self.create_timer(self.get_parameter('period').value,
                                                self.search_callback)
-        self.get_logger().info('Landmark Node ready, waiting for /grid')
+        period = self.get_parameter('save_period').value
+        if self.save_ and period > 0.0:
+            self.save_timer_ = self.create_timer(period, self.save_landmarks)
+        self.get_logger().info('Landmark Node ready, waiting for /grid' +
+                               (f'; saving to {self.npz_path_}' if self.save_ else ''))
 
     def param(self, name):
         """
@@ -100,7 +111,7 @@ class LandmarkNode(Node):
         segments = find_segments(points, p('inlier_distance'), p('sample_radius'),
                                  p('min_points'), p('min_length'), p('max_gap'), p('trials'))
         corners = find_corners(segments, p('corner_angle'), p('corner_distance'))
-        self.searched_ = True
+        self.unsaved_ = True
         self.frame_, self.resolution_ = msg.header.frame_id, msg.info.resolution
         self.segments_, self.corners_ = segments, corners
         self.publish(msg.header.stamp)
@@ -135,20 +146,22 @@ class LandmarkNode(Node):
                              Point(x=float(end[0]), y=float(end[1]))]
         self.segment_pub_.publish(lines)
 
-    def save_final(self):
+    def save_landmarks(self):
         """
-        Save the last landmarks and segments as landmarks.npz (if save)
+        Save the latest landmarks and segments as <log_dir>/<run>_landmarks.npz (if save and
+        they changed since the last save); runs every save_period seconds and on shutdown,
+        and replaces the file whole, so a crash leaves the last complete save
         """
-        if not self.searched_ or not self.save_:        # nothing searched yet, or not wanted
+        if not self.save_ or not self.unsaved_:         # not wanted, or nothing new
             return
-        path = os.path.join(self.get_parameter('output_dir').value, 'landmarks.npz')
         try:
-            np.savez(path, corners=self.corners_,
+            save_npz(self.npz_path_, corners=self.corners_,
                      segments=np.array(self.segments_).reshape(-1, 2, 2),
                      resolution=self.resolution_, frame=self.frame_)
-            self.get_logger().info(f'Saved {path}')
+            self.unsaved_ = False
+            self.get_logger().info(f'Saved {self.npz_path_} ({len(self.corners_)} landmarks)')
         except OSError as e:
-            self.get_logger().warn(f'Could not save {path}: {e}')
+            self.get_logger().warn(f'Could not save {self.npz_path_}: {e}')
 
 
 def main(args=None):
@@ -164,7 +177,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.save_final()
+        node.save_landmarks()
         node.destroy_node()
         rclpy.try_shutdown()
 
