@@ -72,6 +72,13 @@ class OccupancyGrid:
         return (half - 1 - math.floor(x / self.resolution),
                 half - 1 - math.floor(y / self.resolution))
 
+    def cell_to_world(self, row, col):
+        """
+        World point (x, y), in meters, at the center of cell (row, col)
+        """
+        half = self.size // 2
+        return ((half - 0.5 - row) * self.resolution, (half - 0.5 - col) * self.resolution)
+
     def in_bounds(self, row, col):
         """
         Check that (row, col) is a cell of the grid

@@ -3,9 +3,10 @@
 ROS 2 package for CS 5335 Projects 6 and 7. The **Grid Node** builds an occupancy grid
 from the TurtleBot's LiDAR: it reads `/scan`, places each scan using `/odom` and the
 LiDAR's mounting on the robot (from TF), and publishes the grid. The **Landmark Node**
-(Project 7) finds corner landmarks in it. Both only compute and publish, for any node that
-needs their data (later, to decide where to drive); the **Viewer Node** is the only one
-that draws. None of them **ever moves the robot**.
+(Project 7) finds corner landmarks in it, and the **Planner Node** (Project 7) plans a path
+on it by A* to a goal, keeping the robot's width clear of the obstacles. They only compute
+and publish, for any node that needs their data (later, to drive the path); the **Viewer
+Node** is the only one that draws. None of them **ever moves the robot**.
 
 The nodes are in `nodes/`; what they use, without ROS (so it can be tested on its own),
 is in `helpers/`:
@@ -15,24 +16,29 @@ day6pkg/
 ├── nodes/                   ROS 2 nodes: subscribe, publish, save
 │   ├── grid_node.py         Grid Node        (ros2 run day6pkg grid_node)
 │   ├── landmark_node.py     Landmark Node    (ros2 run day6pkg landmark_node)
+│   ├── planner_node.py      Planner Node     (ros2 run day6pkg planner_node)
 │   └── viewer_node.py       Viewer Node      (ros2 run day6pkg viewer_node)
 └── helpers/                 no ROS
     ├── occupancy_grid.py    the grid: log-odds cells, ray casting, saving and loading
     ├── landmarks.py         RANSAC wall segments and corner landmarks
-    ├── render.py            drawing the grid, the path and the landmarks
+    ├── astar.py             growing the obstacles by the robot's size, A* path planning
+    ├── render.py            drawing the grid, the paths and the landmarks
     └── files.py             saving files whole (temporary file, then rename)
 ```
 
 ```
- /scan       LaserScan ──┐                  /grid ──────┬──────────────> Viewer Node ──> window
- /odom       Odometry  ──┼──> Grid Node ──> /grid_path ─┼──────────────>  viewer_node.py   + result/grid/*.png
- /tf_static  LiDAR pose ─┘   grid_node.py      │        └> Landmark Node ──> /landmarks ──┘
-                                               ▼            landmark_node.py  /wall_segments
-                                   logs/<run>_grid.npz                 logs/<run>_landmarks.npz
+ /scan       LaserScan ──┐                  /grid ──────┬────────────────> Viewer Node ──> window
+ /odom       Odometry  ──┼──> Grid Node ──> /grid_path ─┼────────────────>  viewer_node.py   + result/grid/*.png
+ /tf_static  LiDAR pose ─┘   grid_node.py      │        ├> Landmark Node ──> /landmarks ─────┤
+                                               ▼        │   landmark_node.py  /wall_segments │
+                                  logs/<run>_grid_*.npz │   logs/<run>_landmarks_*.npz       │
+                                                        └> Planner Node ───> /planned_path ──┘
+                                                            planner_node.py   /inflated_grid
+                                                            logs/<run>_plan_*.npz
 ```
 
 Without the Viewer Node the others run the same and nothing is drawn; without the
-Landmark Node the Viewer Node draws the grid alone.
+Landmark Node or the Planner Node the Viewer Node draws what it gets.
 
 ## Install dependencies
 
@@ -40,7 +46,7 @@ Once, on the Ubuntu machine that runs the nodes (Ubuntu 24.04, ROS 2 Jazzy):
 
 | Needed by | Python module | Ubuntu package |
 | --- | --- | --- |
-| All three nodes | `numpy` | `python3-numpy` |
+| All nodes | `numpy` | `python3-numpy` |
 | Viewer Node (drawing, window, PNG files) | `cv2` | `python3-opencv` |
 | Landmark Node (RANSAC) | `skimage` | `python3-skimage` |
 | Unit tests | `pytest` | `python3-pytest` |
@@ -77,16 +83,33 @@ python3 -c "import numpy, cv2, skimage; print(numpy.__version__, cv2.__version__
 
 ## Build
 
-From the workspace root (`robotics_ws`), after every change to a Python, launch or YAML
-file:
+`colcon build` copies the Python files, launch files and `config/project7.yaml` into
+`install/`, which is what `ros2 run` and `ros2 launch` use. From the workspace root
+(`robotics_ws`):
 
 ```bash
-colcon build --packages-select day6pkg
+colcon build --packages-select day6pkg --symlink-install
 source install/setup.bash
 ```
 
+With `--symlink-install`, `install/` links to the files in `src/` instead of copying them,
+so a change to a Python, launch or YAML file takes effect at the next start, without
+building again. Build again only after adding or removing a file, or changing `setup.py` or
+`package.xml`. Run `source install/setup.bash` in every new terminal.
+
+The first time after building without `--symlink-install` (or after renaming or moving
+files), remove the old copies first, or the build fails on the files already there:
+
+```bash
+rm -rf build/day6pkg install/day6pkg
+colcon build --packages-select day6pkg --symlink-install
+```
+
+Keep `--symlink-install` on every build: a build without it copies the files again, and
+from then on changes need a build again.
+
 For `day6_launch.py`, build `day3pkg` too:
-`colcon build --packages-select day3_interfaces day3pkg day6pkg`.
+`colcon build --packages-select day3_interfaces day3pkg day6pkg --symlink-install`.
 
 ## Run
 
@@ -99,8 +122,9 @@ ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
 
 ### Project 7: landmarks while driving
 
-`launch/project7_launch.py` starts the Grid Node, the Landmark Node and the Viewer Node
-with the parameters in `config/project7.yaml` (15 m grid, snapshots at 0, 1, 2 and 3 m):
+`launch/project7_launch.py` starts the Grid Node, the Landmark Node, the Planner Node (see
+[A* path to a goal](#project-7-a-path-to-a-goal)) and the Viewer Node with the parameters
+in `config/project7.yaml` (15 m grid, snapshots at 0, 1, 2 and 3 m):
 
 ```bash
 ros2 launch day6pkg project7_launch.py
@@ -109,17 +133,54 @@ ros2 launch day6pkg project7_launch.py
 Drive the robot from another terminal (see [Driving](#driving)), then stop with Ctrl-C;
 launch it again for the way back. Each launch is one run, named after the time it started,
 and its files are named after the run like log files (see [Saved files](#saved-files)), so
-nothing needs naming and no run overwrites another. `run_id:=<name>` names a run yourself.
+nothing needs naming and no run overwrites another.
 `draw:=false` leaves the Viewer Node out: the grid and the landmarks are still computed,
-published and saved, but nothing is drawn. `save_grid` (Grid Node), `save` (Landmark Node)
-and `save_images` (Viewer Node) in the YAML file turn their files off, and `save_period`
-sets how often they are saved (rebuild after changing it).
+published and saved, but nothing is drawn. `save_grid` (Grid Node), `save` (Landmark Node,
+Planner Node) and `save_images` (Viewer Node) in the YAML file turn their files off, and
+`save_period` sets how often they are saved (a change takes effect at the next launch with
+a `--symlink-install` build).
 
 The Landmark Node needs up to `period` (1 s) plus its search time after a grid update to
 publish that grid's landmarks, so the images the Viewer Node saves at a snapshot distance
 show the landmarks of the update before. Wait about 2 s after the robot stops before
-pressing Ctrl-C, so that the last `<run>_landmarks.npz` and `<run>_grid_final.png` hold the
+pressing Ctrl-C, so that `<run>_landmarks_final.npz` and `<run>_grid_final.png` hold the
 landmarks of the last grid.
+
+### Project 7: A* path to a goal
+
+The same launch file starts the Planner Node (`plan:=false` leaves it out). It plans a path
+by A* from where the robot is to the goal `goal_x`, `goal_y`: meters in the grid's frame, x
+along the robot's heading at the start and y to its left. The obstacles are first grown by
+the robot's radius plus a safety margin, so the path keeps the whole robot clear of them,
+and the Viewer Node draws the path in magenta over the grown obstacles in light magenta
+(see [Path planning](#path-planning-a)).
+
+1. Put the robot, undocked, facing the goal at least 2 m away (`min_goal_distance` warns if
+   it is nearer), with an obstacle such as a box on the straight line to it.
+2. Launch with the goal, e.g. 2.5 m ahead and 0.5 m to the left:
+
+   ```bash
+   ros2 launch day6pkg project7_launch.py goal_x:=2.5 goal_y:=0.5
+   ```
+
+   The first grid (one scan, the robot standing at the start) is enough. The Planner Node
+   logs `Path from (x, y) to (x, y) m (d m apart): length m, n cells, bends around
+   obstacles (the straight line is blocked)`, and the window shows the path.
+3. To try another goal while it runs, set it (as a float, `3.0`, not `3`); it plans again
+   within `period` (1 s):
+
+   ```bash
+   ros2 param set /planner_node goal_y 0.8
+   ```
+
+4. Stop with Ctrl-C. `result/grid/<run>_plan.png` is the image of the latest path and
+   `logs/<run>_plan_final.npz` its data.
+
+The robot's LiDAR does not see behind the obstacle, so a goal right behind it is in unknown
+space and is refused (`the goal is in unknown space`). Pick a goal the LiDAR sees past the
+obstacle's side, drive around first so the grid covers it, or let the path through unseen
+cells with `ros2 param set /planner_node unknown_is_free true`. While the robot drives, the
+Planner Node plans again from its new position after every grid update.
 
 ### Project 6: occupancy grid while driving 1 m
 
@@ -132,7 +193,8 @@ Wait for `Update 1` (the start grid, Task 1), type `m 1.0` in the Executive's `x
 window, and after `All snapshots saved` type `q` to stop everything. It needs a desktop
 (the `xterm` and the grid window); over SSH, run the nodes in separate terminals instead
 and drive as below. Each one started on its own names its run after its own start time;
-give both the same `run_id` so their files match:
+give both the same `run_id` so their files match (it is used as given, so reusing one
+replaces that run's files):
 
 ```bash
 ros2 run day6pkg viewer_node --ros-args -p run_id:=day6_test
@@ -154,23 +216,28 @@ then `m 1.0`.
 ### Saved files
 
 The files are saved like logs: every run adds its own files to the same two folders, named
-after the run (`<run>`: the launch's start time, e.g. `2026-10-27_16-40-12`, or `run_id`).
+after the run (`<run>`: the launch's start time, e.g. `2026-10-27_16-40-12`).
 The data goes to `logs/` and the images to `result/grid/`, both in the directory the nodes
 were started from (`log_dir`, `result_dir`), created if missing:
 
 ```
 robotics_ws/
 ├── logs/
-│   ├── 2026-10-27_16-40-12_grid.npz           ← the way there
-│   ├── 2026-10-27_16-40-12_landmarks.npz
-│   ├── 2026-10-27_16-45-03_grid.npz           ← the way back
-│   └── 2026-10-27_16-45-03_landmarks.npz
+│   ├── 2026-10-27_16-40-12_grid_latest.npz         ← the way there, while driving
+│   ├── 2026-10-27_16-40-12_grid_final.npz          ←                on Ctrl-C
+│   ├── 2026-10-27_16-40-12_landmarks_latest.npz
+│   ├── 2026-10-27_16-40-12_landmarks_final.npz
+│   ├── 2026-10-27_16-40-12_plan_latest.npz
+│   ├── 2026-10-27_16-40-12_plan_final.npz
+│   └── 2026-10-27_16-45-03_…                       ← the way back
 └── result/
     └── grid/
         ├── 2026-10-27_16-40-12_grid_0.00m.png  … _grid_3.00m.png
         ├── 2026-10-27_16-40-12_grid_summary.png
+        ├── 2026-10-27_16-40-12_grid_latest.png
         ├── 2026-10-27_16-40-12_grid_final.png
-        └── 2026-10-27_16-45-03_grid_…png
+        ├── 2026-10-27_16-40-12_plan.png
+        └── 2026-10-27_16-45-03_…
 ```
 
 It is `logs/`, not `log/`: colcon writes its own build logs to `robotics_ws/log/`. Git
@@ -180,41 +247,56 @@ ignores both `logs/` and `result/`.
 | --- | --- | --- |
 | `result/grid/<run>_grid_<d>m.png` | Viewer Node | The image after `d` m of travel, one per `snapshot_distances` (`_grid_0.00m.png` is the start grid) |
 | `result/grid/<run>_grid_summary.png` | Viewer Node | The snapshots so far, side by side |
-| `result/grid/<run>_grid_final.png` | Viewer Node | The latest image |
-| `logs/<run>_grid.npz` | Grid Node | Log-odds, resolution, the pose of each update and ^world T_odom |
-| `logs/<run>_landmarks.npz` | Landmark Node | `corners` (K × 2), `segments` (N × 2 × 2), m, `resolution`, `frame` |
+| `result/grid/<run>_grid_latest.png`, `_grid_final.png` | Viewer Node | The image with the grid, the path, the landmarks and the planned path |
+| `result/grid/<run>_plan.png` | Viewer Node | The image with the latest planned path |
+| `logs/<run>_grid_latest.npz`, `_grid_final.npz` | Grid Node | Log-odds, resolution, the pose of each update and ^world T_odom |
+| `logs/<run>_landmarks_latest.npz`, `_landmarks_final.npz` | Landmark Node | `corners` (K × 2), `segments` (N × 2 × 2), m, `resolution`, `frame` |
+| `logs/<run>_plan_latest.npz`, `_plan_final.npz` | Planner Node | The latest plan: `points` (N × 2, m, the path; empty if none), `length` (m), `straight`, `problem`, `start`, `goal`, `robot_radius`, `safety_margin`, `resolution`, `frame` |
 
-The snapshots are saved when their distance is reached. The other three are saved every
-`save_period` seconds (10 s) while they change, and once more on Ctrl-C; `save_period: 0.0`
-saves on Ctrl-C only. A file is written to a temporary file first and then renamed over the
-old one, so a node killed while saving (or never stopped with Ctrl-C) leaves its last
-complete file, at most `save_period` old.
+When each is saved:
+
+| Name ends in | When | Means |
+| --- | --- | --- |
+| `_<d>m.png`, `_summary.png` | When the travel reaches each snapshot distance | |
+| `_plan.png` | When a new planned path is drawn | The latest path |
+| `_latest` | Every `save_period` seconds (10 s) while it changes; `save_period: 0.0` turns it off | The run so far; kept even if the node never stops normally |
+| `_final` | Once, when the node is stopped with Ctrl-C | The run ended normally; **use these** |
+
+A run can have only one `_final` of each: its name is fixed when it starts, and a node
+stops only once. A file is written to a temporary file first and then renamed over the
+old one, so it is never half written: a node killed while saving leaves the file it had,
+or no `_final` at all if it was killed before that was done, with the `_latest` from at
+most `save_period` before. Two launches never share a name, since the time comes first;
+only nodes started on their own with the same `run_id` replace each other's files.
 
 ## Nodes and topics
 
 The robot publishes `/scan`, `/odom` and `/tf_static` on its own. Everything else comes from
-the three nodes of this package:
+the four nodes of this package:
 
 | Node | Subscribes to | Publishes | Saves |
 | --- | --- | --- | --- |
-| Grid Node (`grid_node`) | `/scan`, `/odom`, `/tf_static` | `/grid`, `/grid_path` | `logs/<run>_grid.npz` (`save_grid`) |
-| Landmark Node (`landmark_node`) | `/grid` | `/landmarks`, `/wall_segments` | `logs/<run>_landmarks.npz` (`save`) |
-| Viewer Node (`viewer_node`) | `/grid`, `/grid_path`, `/landmarks`, `/wall_segments` | nothing | `result/grid/<run>_grid_*.png` (`save_images`) |
+| Grid Node (`grid_node`) | `/scan`, `/odom`, `/tf_static` | `/grid`, `/grid_path` | `logs/<run>_grid_*.npz` (`save_grid`) |
+| Landmark Node (`landmark_node`) | `/grid` | `/landmarks`, `/wall_segments` | `logs/<run>_landmarks_*.npz` (`save`) |
+| Planner Node (`planner_node`) | `/grid`, `/grid_path` | `/planned_path`, `/inflated_grid` | `logs/<run>_plan_*.npz` (`save`) |
+| Viewer Node (`viewer_node`) | `/grid`, `/grid_path`, `/landmarks`, `/wall_segments`, `/planned_path`, `/inflated_grid` | nothing | `result/grid/<run>_*.png` (`save_images`) |
 
 | Topic | From | To | Type | When |
 | --- | --- | --- | --- | --- |
 | `/scan` | robot (LiDAR) | Grid Node | `sensor_msgs/LaserScan` | Every LiDAR turn |
 | `/odom` | robot (base) | Grid Node | `nav_msgs/Odometry` | Every odometry update |
 | `/tf_static` | robot | Grid Node (looked up once) | TF | Once, at start-up |
-| `/grid` | Grid Node | Landmark Node, Viewer Node | `nav_msgs/OccupancyGrid` | Every grid update (every 0.1 m) |
-| `/grid_path` | Grid Node | Viewer Node | `nav_msgs/Path` | Every grid update, stamped like `/grid` |
+| `/grid` | Grid Node | Landmark Node, Planner Node, Viewer Node | `nav_msgs/OccupancyGrid` | Every grid update (every 0.1 m) |
+| `/grid_path` | Grid Node | Planner Node, Viewer Node | `nav_msgs/Path` | Every grid update, stamped like `/grid` |
 | `/landmarks` | Landmark Node | Viewer Node | `geometry_msgs/PoseArray` | At most once per `period` (1 s), for a new grid |
 | `/wall_segments` | Landmark Node | Viewer Node | `visualization_msgs/Marker` | With `/landmarks`, stamped alike |
+| `/planned_path` | Planner Node | Viewer Node | `nav_msgs/Path` | At most once per `period` (1 s), for a new grid or a changed goal |
+| `/inflated_grid` | Planner Node | Viewer Node | `nav_msgs/OccupancyGrid` | With `/planned_path`, stamped alike |
 
-The four topics of this package are in the grid's frame (`world`: the sensor's position and
+The six topics of this package are in the grid's frame (`world`: the sensor's position and
 the robot's heading at the Grid Node's first update) and keep their latest message
 (transient local, depth 1), so a node started later gets each of them at once. RViz can
-show all four (Map, Path, PoseArray, Marker). What they hold:
+show all six (Map, Path, PoseArray, Marker). What they hold:
 
 | Topic | Contents |
 | --- | --- |
@@ -222,6 +304,8 @@ show all four (Map, Path, PoseArray, Marker). What they hold:
 | `/grid_path` | `poses`: one per grid update so far, oldest first: the sensor's position (x, y) and the robot's heading (rotation about z) |
 | `/landmarks` | `poses`: one per corner landmark, position (x, y) only, sorted by x then y (`L1`, `L2`, ... in the images); stamped like the grid they were found in |
 | `/wall_segments` | A `LINE_LIST` marker: `points` holds two points per wall segment (start, end); width and color are for RViz |
+| `/planned_path` | `poses`: the centers of the path's cells from the robot to the goal, each with the heading toward the next one; no poses if there is no path; stamped like the grid it was planned on |
+| `/inflated_grid` | Laid out like `/grid`: 100 where the robot's center must not go (the obstacles grown by `robot_radius` + `safety_margin`), −1 never seen, 0 free |
 
 ## How it works
 
@@ -250,8 +334,10 @@ rotates the map by 90° and smears the walls while driving.
 In the Viewer Node's image, black is occupied, white is free and gray is unknown. The green
 circle is the start, the blue dots are the sensor's position at each update, and the red
 arrow is the robot's current heading. With the Landmark Node running, the wall segments
-are orange lines and the corner landmarks red circles (`L1`, `L2`, ...). The bar in the
-bottom-left corner is 1 m.
+are orange lines and the corner landmarks red circles (`L1`, `L2`, ...). With the Planner
+Node running, the planned path is a magenta line to a magenta circle at the goal, and the
+cells around the obstacles where the robot's center must not go are light magenta. The
+bar in the bottom-left corner is 1 m.
 
 Example image:
 <img width="1812" height="600" alt="grid_summary" src="https://github.com/user-attachments/assets/2010fb33-4cf8-4db3-a9eb-5d0574209ab3" />
@@ -269,11 +355,38 @@ landmarks in every new `/grid`, once per `period`:
 3. Corners (slide 48): two segments crossing at `corner_angle` or more, both ending within
    `corner_distance` of the crossing.
 
+### Path planning (A*)
+
+The Planner Node (`nodes/planner_node.py`, algorithms in `helpers/astar.py`) plans on the
+latest `/grid` when it is new or a plan parameter changed, once per `period`:
+
+1. Cells: an obstacle if its log-odds is above `occupied` (0.5), free if below −0.5, never
+   seen in between. One LiDAR hit adds 0.95, so one scan is enough to see an obstacle (the
+   Landmark Node's 1.0 needs two).
+2. Width of the robot (configuration space): the TurtleBot 4 is a disk of 342 × 339 mm, so
+   every obstacle cell is grown by `robot_radius` (0.171 m) + `safety_margin` (0.05 m). The
+   margin covers the cell size (an obstacle may be half a cell diagonal, 3.5 cm, nearer than
+   its cell's center) and driving errors. Wherever the robot's center is in a free cell of
+   the grown grid, its body is clear of the obstacles, so A* can plan for that one point.
+   The cells within `robot_radius` of the robot count as free: it stands there, so what the
+   LiDAR saw there is the robot itself or noise.
+3. Unknown cells: blocked unless `unknown_is_free`, but not grown, so that one cell missed
+   between two LiDAR rays does not close a passage. The robot's side may still reach into
+   unseen space, e.g. behind an obstacle.
+4. A* from the robot's cell (the last pose of `/grid_path`) to the goal's cell: steps to the
+   8 neighbors, sideways costing 1 cell and diagonally √2; a diagonal step needs both cells
+   beside it free, so the path never cuts a blocked corner. The heuristic is the octile
+   distance (the cost if nothing were in the way), which never overestimates, so the path
+   is a shortest one.
+5. The node also checks the straight line from the robot to the goal: if it crosses a grown
+   obstacle, the log says the path `bends around obstacles`.
+
 ## Parameters
 
 Set with `--ros-args -p name:=value`, e.g.
 `ros2 run day6pkg viewer_node --ros-args -p result_dir:=/home/robo/result -p display:=false`,
-or in a YAML file (as `config/project7.yaml`; rebuild after changing it).
+or in a YAML file (as `config/project7.yaml`; a change takes effect at the next launch with a
+`--symlink-install` build, see [Build](#build)).
 
 Grid Node (`grid_node`):
 
@@ -288,10 +401,10 @@ Grid Node (`grid_node`):
 | `use_tf` | `true` | Read the LiDAR mounting from TF |
 | `mount_yaw` | `90.0` | LiDAR yaw on the robot when `use_tf` is false, degrees |
 | `grid_frame` | `world` | `frame_id` of `/grid` and `/grid_path` |
-| `save_grid` | `true` | Save the grid as `<run>_grid.npz` |
-| `save_period` | `10.0` | Seconds between saves while the grid changes (and on Ctrl-C); `0.0`: on Ctrl-C only |
+| `save_grid` | `true` | Save the grid as `<run>_grid_latest.npz` and `<run>_grid_final.npz` |
+| `save_period` | `10.0` | Seconds between `_latest` saves while the grid changes; `0.0`: none (`_final` is still saved on Ctrl-C) |
 | `log_dir` | `logs` | Where the `.npz` file is saved (created if missing) |
-| `run_id` | `''` | The run's name, which starts the file name; empty: the node's start time (the launch files set it) |
+| `run_id` | `''` | The run's name, used as given to start the file names (the launch files set it to their start time); empty: the node's start time |
 
 Landmark Node (`landmark_node`; Day 7 slides 45 and 48):
 
@@ -307,10 +420,26 @@ Landmark Node (`landmark_node`; Day 7 slides 45 and 48):
 | `corner_angle` | `60.0` | Two segments must cross at least at this angle to make a corner, degrees |
 | `corner_distance` | `0.15` | Both segments must end this near their crossing, m |
 | `period` | `1.0` | How often to look for a new grid, s |
-| `save` | `true` | Save `<run>_landmarks.npz` |
-| `save_period` | `10.0` | Seconds between saves while the landmarks change (and on Ctrl-C); `0.0`: on Ctrl-C only |
+| `save` | `true` | Save `<run>_landmarks_latest.npz` and `<run>_landmarks_final.npz` |
+| `save_period` | `10.0` | Seconds between `_latest` saves while the landmarks change; `0.0`: none (`_final` is still saved on Ctrl-C) |
 | `log_dir` | `logs` | Where the `.npz` file is saved (created if missing) |
-| `run_id` | `''` | The run's name, which starts the file name; empty: the node's start time (the launch files set it) |
+| `run_id` | `''` | The run's name, used as given to start the file names (the launch files set it to their start time); empty: the node's start time |
+
+Planner Node (`planner_node`; floats need a decimal point when set: `3.0`, not `3`):
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `goal_x`, `goal_y` | `2.5`, `0.0` | The goal in the grid's frame, m (`goal_x:=`, `goal_y:=` in the launch file) |
+| `min_goal_distance` | `2.0` | Warn if the goal is nearer the robot than this, m |
+| `robot_radius` | `0.171` | Half the robot's size (TurtleBot 4: 342 × 339 mm), m |
+| `safety_margin` | `0.05` | Clearance kept beyond `robot_radius`, m |
+| `occupied` | `0.5` | Log-odds above which a cell is an obstacle (below its negative: free; between: unknown) |
+| `unknown_is_free` | `false` | Let the path go through cells never seen |
+| `period` | `1.0` | How often to check for a new grid or changed parameters, s |
+| `save` | `true` | Save `<run>_plan_latest.npz` and `<run>_plan_final.npz` |
+| `save_period` | `10.0` | Seconds between `_latest` saves while the plan changes; `0.0`: none (`_final` is still saved on Ctrl-C) |
+| `log_dir` | `logs` | Where the `.npz` file is saved (created if missing) |
+| `run_id` | `''` | The run's name, used as given to start the file names (the launch files set it to their start time); empty: the node's start time |
 
 Viewer Node (`viewer_node`):
 
@@ -320,18 +449,18 @@ Viewer Node (`viewer_node`):
 | `distance_tolerance` | `0.03` | This far short of a snapshot distance still reaches it, m |
 | `image_scale` | `3` | Image pixels per cell side |
 | `display` | `true` | Show the image in a window (skipped without a display) |
-| `save_images` | `true` | Save the snapshots and `<run>_grid_final.png` |
-| `save_period` | `10.0` | Seconds between `<run>_grid_final.png` saves while the image changes (and on Ctrl-C); `0.0`: on Ctrl-C only |
+| `save_images` | `true` | Save the snapshots, `<run>_grid_latest.png`, `<run>_grid_final.png` and `<run>_plan.png` |
+| `save_period` | `10.0` | Seconds between `<run>_grid_latest.png` saves while the image changes; `0.0`: none (`_final` is still saved on Ctrl-C) |
 | `result_dir` | `result` | The images are saved in its `grid/` folder (created if missing) |
-| `run_id` | `''` | The run's name, which starts the file names; empty: the node's start time (the launch files set it) |
+| `run_id` | `''` | The run's name, used as given to start the file names (the launch files set it to their start time); empty: the node's start time |
 
 ## Testing without the robot
 
-- Unit tests of the grid and the landmark search, from this package's directory
-  (`robotics_ws/src/day6pkg`); the RANSAC tests are skipped without scikit-image:
+- Unit tests of the grid, the landmark search and the planner, from this package's
+  directory (`robotics_ws/src/day6pkg`); the RANSAC tests are skipped without scikit-image:
 
   ```bash
-  python3 -m pytest test/test_grid.py test/test_landmarks.py
+  python3 -m pytest test/test_grid.py test/test_landmarks.py test/test_astar.py
   ```
 
 - Record the topics once on the robot and replay them later into the Grid Node:
@@ -351,3 +480,5 @@ Viewer Node (`viewer_node`):
 | The Grid Node keeps logging `Waiting for transform base_link -> rplidar_link` | TF is not reaching the laptop: `ros2 run tf2_ros tf2_echo base_link rplidar_link`; or run with `-p use_tf:=false` to use `mount_yaw` (90°) |
 | No grid updates | The robot's topics arrive: `ros2 topic list -t \| grep -E 'scan\|odom'`, `timeout 10 ros2 topic hz /scan` |
 | Nothing drawn or no landmarks | This package's topics are published: `timeout 5 ros2 topic echo /grid --once --no-arr`, `timeout 5 ros2 topic echo /landmarks --once` |
+| The Planner Node logs `No path ...` | It says why: the goal is in unknown space (see [A* path to a goal](#project-7-a-path-to-a-goal)), the start or the goal is within `robot_radius` + `safety_margin` of an obstacle (move it, or lower `safety_margin`), or the grown obstacles close every way |
+| `ros2 param set` fails with a parameter type error | Give floats with a decimal point: `goal_x 3.0`, not `goal_x 3` |

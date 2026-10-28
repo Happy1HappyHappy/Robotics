@@ -8,13 +8,19 @@ import re
 import numpy as np
 import pytest
 
-from day6pkg.helpers.files import run_name
+from day6pkg.helpers.files import new_run_name, run_name
 from day6pkg.helpers.occupancy_grid import bresenham, log_odds, OccupancyGrid
 
+TIME = r'\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d'     # 2026-10-27_16-40-12
 
-def test_run_name_is_the_given_id_or_the_start_time():
-    assert run_name('there') == 'there'
-    assert re.fullmatch(r'\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d', run_name())   # 2026-10-27_16-40-12
+
+def test_a_new_run_is_named_after_the_time():
+    assert re.fullmatch(TIME, new_run_name())
+
+
+def test_run_name_is_the_given_id_or_a_new_name():
+    assert run_name('2026-10-27_16-40-12') == '2026-10-27_16-40-12'
+    assert re.fullmatch(TIME, run_name())
 
 
 @pytest.mark.parametrize('end', [(5, 2), (2, 5), (-5, 2), (2, -5), (-3, -3), (0, 4), (4, 0)])
