@@ -5,8 +5,8 @@ wall segments by RANSAC, then corners where two segments meet (see helpers/landm
 Publishes the corners on /landmarks (geometry_msgs/PoseArray) and the wall segments on
 /wall_segments (visualization_msgs/Marker, a line list), both in the grid's frame, for the
 nodes that use them (the Viewer Node, later localization); it draws nothing itself
-It saves the latest ones as <log_dir>/<run>_landmarks.npz every save_period seconds while
-they change, and on shutdown (save)
+It saves the latest ones as <log_dir>/<run>_landmarks_latest.npz every save_period seconds
+while they change, and as <run>_landmarks_final.npz on shutdown (save)
 This node never moves the robot
 """
 
@@ -48,21 +48,23 @@ class LandmarkNode(Node):
         self.declare_parameter('corner_angle', 60.0)        # deg, smallest angle between segments
         self.declare_parameter('corner_distance', 0.15)     # m, segment ends this near the corner
         self.declare_parameter('period', 1.0)               # s, how often to look for a new grid
-        self.declare_parameter('save', True)                # save <run>_landmarks.npz
+        self.declare_parameter('save', True)                # save <run>_landmarks_*.npz
         self.declare_parameter('save_period', 10.0)         # s between saves; 0: on shutdown only
         self.declare_parameter('log_dir', 'logs')           # where the .npz files are saved
         self.declare_parameter('run_id', '')                # names the files; '' = start time
 
         self.save_ = self.get_parameter('save').value
         log_dir = self.get_parameter('log_dir').value
+        # <run>_landmarks_latest.npz while driving, <run>_landmarks_final.npz on shutdown
         self.npz_path_ = os.path.join(
-            log_dir, f'{run_name(self.get_parameter("run_id").value)}_landmarks.npz')
+            log_dir, f'{run_name(self.get_parameter("run_id").value)}_landmarks_{{}}.npz')
         if self.save_:
             os.makedirs(log_dir, exist_ok=True)
 
         self.grid_msg_ = None           # latest /grid message
         self.new_grid_ = False          # it has not been searched yet
-        self.unsaved_ = False           # landmarks found since the last save
+        self.searched_ = False          # a grid has been searched at least once
+        self.unsaved_ = False           # landmarks found since the last _latest save
         self.frame_ = ''                # frame_id of the last grid searched
         self.resolution_ = 0.0          # m, its cell side
         self.segments_ = []             # its wall segments [(start, end), ...], m
@@ -78,7 +80,8 @@ class LandmarkNode(Node):
         if self.save_ and period > 0.0:
             self.save_timer_ = self.create_timer(period, self.save_landmarks)
         self.get_logger().info('Landmark Node ready, waiting for /grid' +
-                               (f'; saving to {self.npz_path_}' if self.save_ else ''))
+                               (f'; saving to {self.npz_path_.format("latest")}'
+                                if self.save_ else ''))
 
     def param(self, name):
         """
@@ -111,7 +114,7 @@ class LandmarkNode(Node):
         segments = find_segments(points, p('inlier_distance'), p('sample_radius'),
                                  p('min_points'), p('min_length'), p('max_gap'), p('trials'))
         corners = find_corners(segments, p('corner_angle'), p('corner_distance'))
-        self.unsaved_ = True
+        self.searched_ = self.unsaved_ = True
         self.frame_, self.resolution_ = msg.header.frame_id, msg.info.resolution
         self.segments_, self.corners_ = segments, corners
         self.publish(msg.header.stamp)
@@ -146,29 +149,34 @@ class LandmarkNode(Node):
                              Point(x=float(end[0]), y=float(end[1]))]
         self.segment_pub_.publish(lines)
 
-    def save_landmarks(self):
+    def save_landmarks(self, final=False):
         """
-        Save the latest landmarks and segments as <log_dir>/<run>_landmarks.npz (if save and
-        they changed since the last save); runs every save_period seconds and on shutdown,
-        and replaces the file whole, so a crash leaves the last complete save
+        Save the latest landmarks and segments (if save): as
+        <log_dir>/<run>_landmarks_latest.npz every save_period seconds if they changed, or
+        as <run>_landmarks_final.npz on shutdown (final)
+        Each file is replaced whole, so a crash leaves the last complete save
         """
-        if not self.save_ or not self.unsaved_:         # not wanted, or nothing new
+        if not self.save_ or not self.searched_:        # not wanted, or nothing searched yet
             return
+        if not final and not self.unsaved_:             # nothing new since the last _latest
+            return
+        path = self.npz_path_.format('final' if final else 'latest')
         try:
-            save_npz(self.npz_path_, corners=self.corners_,
+            save_npz(path, corners=self.corners_,
                      segments=np.array(self.segments_).reshape(-1, 2, 2),
                      resolution=self.resolution_, frame=self.frame_)
-            self.unsaved_ = False
-            self.get_logger().info(f'Saved {self.npz_path_} ({len(self.corners_)} landmarks)')
+            if not final:
+                self.unsaved_ = False
+            self.get_logger().info(f'Saved {path} ({len(self.corners_)} landmarks)')
         except OSError as e:
-            self.get_logger().warn(f'Could not save {self.npz_path_}: {e}')
+            self.get_logger().warn(f'Could not save {path}: {e}')
 
 
 def main(args=None):
     """
     Entry point for the landmark node
     Initializes the ROS 2 system, creates the node, and spins it
-    Saves the last landmarks on shutdown
+    Saves the final landmarks on shutdown
     """
     rclpy.init(args=args)
     node = LandmarkNode()
@@ -177,7 +185,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.save_landmarks()
+        node.save_landmarks(final=True)
         node.destroy_node()
         rclpy.try_shutdown()
 

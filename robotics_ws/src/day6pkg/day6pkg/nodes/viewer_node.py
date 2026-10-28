@@ -1,13 +1,16 @@
 """
 Viewer node for the day6pkg package (Projects 6 and 7)
 Draws what the other nodes publish, and nothing else does any drawing: the grid (/grid) with
-the sensor's path (/grid_path), the wall segments (/wall_segments) and the corner landmarks
-(/landmarks) on top, shown in a window
+the sensor's path (/grid_path), the wall segments (/wall_segments), the corner landmarks
+(/landmarks), the obstacles grown by the robot's size (/inflated_grid) and the planned path
+(/planned_path) on top, shown in a window
 Saves the image to <result_dir>/grid/ as <run>_grid_<distance>m.png at each snapshot
-distance of travel (with <run>_grid_summary.png, all of them side by side), and the latest
-one as <run>_grid_final.png every save_period seconds while it changes and on shutdown
+distance of travel (with <run>_grid_summary.png, all of them side by side), the latest one
+as <run>_grid_latest.png every save_period seconds while it changes, the last one as
+<run>_grid_final.png on shutdown, and the one with each new planned path as <run>_plan.png
 (save_images)
-Without this node the others run the same; without the Landmark Node it draws the grid only
+Without this node the others run the same; without the Landmark Node or the Planner Node it
+draws what it gets
 """
 
 import math
@@ -15,8 +18,8 @@ import os
 
 import cv2
 from geometry_msgs.msg import PoseArray                 # the landmarks (/landmarks)
-from nav_msgs.msg import OccupancyGrid as GridMsg       # the grid (/grid)
-from nav_msgs.msg import Path                           # the path (/grid_path)
+from nav_msgs.msg import OccupancyGrid as GridMsg       # the grid (/grid, /inflated_grid)
+from nav_msgs.msg import Path                           # the paths (/grid_path, /planned_path)
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -62,11 +65,14 @@ class ViewerNode(Node):
         self.poses_ = []                # (x, y, heading) of each update, from the path
         self.segments_ = []             # [(start, end), ...], m
         self.corners_ = np.zeros((0, 2))    # K x 2, m
+        self.plan_ = np.zeros((0, 2))       # planned path, N x 2, m
+        self.blocked_ = None            # mask of the grown obstacles, laid out like the grid
+        self.new_plan_ = False          # a planned path not saved as <run>_plan.png yet
         self.last_update_ = None        # stamp of the last grid update handled
         self.changed_ = False           # something new to draw
         self.snapshots_ = {}            # snapshot distance (m) -> image
         self.image_ = None
-        self.unsaved_ = False           # the image changed since grid_final.png was saved
+        self.unsaved_ = False           # the image changed since _grid_latest.png was saved
         self.window_open_ = False
 
         latest = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -74,6 +80,8 @@ class ViewerNode(Node):
         self.create_subscription(Path, 'grid_path', self.path_callback, latest)
         self.create_subscription(PoseArray, 'landmarks', self.landmark_callback, latest)
         self.create_subscription(Marker, 'wall_segments', self.segment_callback, latest)
+        self.create_subscription(Path, 'planned_path', self.plan_callback, latest)
+        self.create_subscription(GridMsg, 'inflated_grid', self.inflated_callback, latest)
         self.draw_timer_ = self.create_timer(0.1, self.draw_callback)
         period = self.get_parameter('save_period').value
         if self.save_ and period > 0.0:
@@ -118,6 +126,22 @@ class ViewerNode(Node):
         self.segments_ = list(zip(ends[0::2], ends[1::2]))
         self.changed_ = True
 
+    def plan_callback(self, msg: Path):
+        """
+        Store the latest planned path (no poses: no path)
+        """
+        self.plan_ = np.array([[p.pose.position.x, p.pose.position.y]
+                               for p in msg.poses]).reshape(-1, 2)
+        self.new_plan_ = len(self.plan_) > 0
+        self.changed_ = True
+
+    def inflated_callback(self, msg: GridMsg):
+        """
+        Store the latest grown obstacles (occupancy 100) as a mask laid out like the grid
+        """
+        self.blocked_ = OccupancyGrid.from_ros_layout(msg.data, msg.info.resolution).log_odds > 0.0
+        self.changed_ = True
+
     # ---------- drawing ----------
     def draw_callback(self):
         """
@@ -135,10 +159,13 @@ class ViewerNode(Node):
             if self.grid_ is not None:
                 self.image_ = map_image(self.grid_, self.get_parameter('image_scale').value,
                                         self.poses_, self.segments_, self.corners_,
-                                        self.label())
+                                        self.label(), self.blocked_, self.plan_)
                 self.unsaved_ = True
                 if update and self.save_:
                     self.save_snapshots()
+                if self.new_plan_ and self.save_:
+                    self.new_plan_ = False
+                    self.save_image('plan.png', self.image_)
         if self.display_ and self.image_ is not None:
             try:
                 cv2.imshow(WINDOW, self.image_)
@@ -174,8 +201,12 @@ class ViewerNode(Node):
         """
         Text in the image's corner
         """
-        return (f'{self.traveled():.2f} m traveled, {len(self.poses_)} scans, '
+        text = (f'{self.traveled():.2f} m traveled, {len(self.poses_)} scans, '
                 f'{len(self.corners_)} landmarks')
+        if len(self.plan_):
+            length = np.sum(np.linalg.norm(np.diff(self.plan_, axis=0), axis=1))
+            text += f', plan {length:.2f} m'
+        return text
 
     # ---------- saving ----------
     def save_snapshots(self):
@@ -211,11 +242,18 @@ class ViewerNode(Node):
 
     def save_latest(self):
         """
-        Save the latest image as <run>_grid_final.png (if save_images and it changed since
-        the last save); runs every save_period seconds and on shutdown
+        Save the latest image as <run>_grid_latest.png (if save_images and it changed since
+        the last save); runs every save_period seconds
         """
-        if self.save_ and self.unsaved_ and self.save_image('grid_final.png', self.image_):
+        if self.save_ and self.unsaved_ and self.save_image('grid_latest.png', self.image_):
             self.unsaved_ = False
+
+    def save_final(self):
+        """
+        Save the last image as <run>_grid_final.png (if save_images), on shutdown
+        """
+        if self.save_ and self.image_ is not None:
+            self.save_image('grid_final.png', self.image_)
 
 
 def main(args=None):
@@ -231,7 +269,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.save_latest()
+        node.save_final()
         if node.window_open_:
             cv2.destroyAllWindows()
         node.destroy_node()

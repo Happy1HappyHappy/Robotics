@@ -1,7 +1,7 @@
 """
 Launch file for the day6pkg package (Project 6): the Grid Node and the Viewer Node, plus
 day3pkg's Driving and Executive nodes
-Both nodes name their files after this run's start time (logs/<run>_grid.npz,
+Both nodes name their files after this run's start time (logs/<run>_grid_*.npz,
 result/grid/<run>_grid_*.png)
 """
 
@@ -14,7 +14,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
-from day6pkg.helpers.files import run_name
+from day6pkg.helpers.files import new_run_name
 
 
 def generate_launch_description():
@@ -24,7 +24,7 @@ def generate_launch_description():
     """
     ld = LaunchDescription()
     # one name for both nodes' files, read as text even though it looks like a date
-    run = {'run_id': ParameterValue(run_name(), value_type=str)}
+    run = {'run_id': ParameterValue(new_run_name(), value_type=str)}
 
     grid = Node(
         package='day6pkg',

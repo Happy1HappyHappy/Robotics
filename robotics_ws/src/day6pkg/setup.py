@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'grid_node = day6pkg.nodes.grid_node:main',
             'landmark_node = day6pkg.nodes.landmark_node:main',
+            'planner_node = day6pkg.nodes.planner_node:main',
             'viewer_node = day6pkg.nodes.viewer_node:main',
         ],
     },

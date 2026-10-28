@@ -13,6 +13,10 @@ PATH_COLOR = (255, 0, 0)        # blue
 SENSOR_COLOR = (0, 0, 255)      # red
 TEXT_COLOR = (0, 0, 0)          # black
 SEGMENT_COLOR = (0, 140, 255)   # orange
+PLAN_COLOR = (255, 0, 255)      # magenta
+# cells the robot's center must not enter are multiplied by this: white turns light
+# magenta, gray darker, black stays black
+BLOCKED_TINT = np.array([1.0, 0.7, 1.0])
 
 
 def world_to_pixel(grid, x, y, scale):
@@ -24,7 +28,7 @@ def world_to_pixel(grid, x, y, scale):
             int(round((half - x / grid.resolution) * scale)))
 
 
-def grid_image(grid, scale=3, poses=(), label=''):
+def grid_image(grid, scale=3, poses=(), label='', blocked=None):
     """
     Draw the grid as a BGR image: occupied = black, free = white, unknown = gray
     Up is +x (the robot's start heading), left is +y
@@ -33,9 +37,13 @@ def grid_image(grid, scale=3, poses=(), label=''):
     path: all as dots, the first as the start (green), the last with an arrow along the
     heading (red); pass the robot's heading, not the LiDAR's, so the arrow points forward
     label: text drawn in the top-left corner
+    blocked: mask laid out like grid.log_odds, of the cells to tint magenta (the obstacles
+    grown by the robot's size, where its center must not go); None: no tint
     """
     gray = np.round((1.0 - grid.probability()) * 255.0).astype(np.uint8)
     img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    if blocked is not None and blocked.shape == gray.shape:
+        img[blocked] = np.round(img[blocked] * BLOCKED_TINT).astype(np.uint8)
     img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
 
     for x, y, _ in poses:
@@ -60,13 +68,15 @@ def grid_image(grid, scale=3, poses=(), label=''):
     return img
 
 
-def map_image(grid, scale=3, poses=(), segments=(), corners=(), label=''):
+def map_image(grid, scale=3, poses=(), segments=(), corners=(), label='', blocked=None,
+              plan=()):
     """
-    The grid image (see grid_image) with wall segments (orange) and corner landmarks (red
-    circles, L1, L2, ...) on top
-    segments: [(start, end), ...] and corners: K x 2, world (x, y) in meters
+    The grid image (see grid_image, with blocked) with wall segments (orange), corner
+    landmarks (red circles, L1, L2, ...) and the planned path (a magenta line to a magenta
+    circle at the goal) on top
+    segments: [(start, end), ...], corners: K x 2 and plan: N x 2, world (x, y) in meters
     """
-    img = grid_image(grid, scale, poses, label)
+    img = grid_image(grid, scale, poses, label, blocked)
     for start, end in segments:
         cv2.line(img, world_to_pixel(grid, *start, scale), world_to_pixel(grid, *end, scale),
                  SEGMENT_COLOR, 2)
@@ -75,6 +85,13 @@ def map_image(grid, scale=3, poses=(), segments=(), corners=(), label=''):
         cv2.circle(img, (u, v), 6, SENSOR_COLOR, 2)
         cv2.putText(img, f'L{k}', (u + 7, v - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.45, SENSOR_COLOR,
                     1, cv2.LINE_AA)
+    if len(plan):
+        pixels = np.array([world_to_pixel(grid, x, y, scale) for x, y in plan], dtype=np.int32)
+        cv2.polylines(img, [pixels], False, PLAN_COLOR, 2, cv2.LINE_AA)
+        u, v = pixels[-1]
+        cv2.circle(img, (int(u), int(v)), 6, PLAN_COLOR, 2)
+        cv2.putText(img, 'goal', (int(u) + 8, int(v) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    PLAN_COLOR, 1, cv2.LINE_AA)
     return img
 
 
