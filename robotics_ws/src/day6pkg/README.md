@@ -9,7 +9,7 @@ and publish, for any node that needs their data (later, to drive the path); the 
 Node** is the only one that draws. None of them **ever moves the robot**.
 
 The nodes are in `nodes/`; what they use, without ROS (so it can be tested on its own),
-is in `helpers/`:
+is in `helpers/`; `tools/` reads the saved files after a run:
 
 ```
 day6pkg/
@@ -18,9 +18,12 @@ day6pkg/
 │   ├── landmark_node.py     Landmark Node    (ros2 run day6pkg landmark_node)
 │   ├── planner_node.py      Planner Node     (ros2 run day6pkg planner_node)
 │   └── viewer_node.py       Viewer Node      (ros2 run day6pkg viewer_node)
+├── tools/                   no ROS nodes: read the files the runs saved
+│   └── compare_landmarks.py two runs' landmarks (ros2 run day6pkg compare_landmarks)
 └── helpers/                 no ROS
     ├── occupancy_grid.py    the grid: log-odds cells, ray casting, saving and loading
     ├── landmarks.py         RANSAC wall segments and corner landmarks
+    ├── compare.py           two runs' landmarks in one frame, pairing the same ones
     ├── astar.py             growing the obstacles by the robot's size, A* path planning
     ├── render.py            drawing the grid, the paths and the landmarks
     └── files.py             saving files whole (temporary file, then rename)
@@ -182,6 +185,39 @@ obstacle's side, drive around first so the grid covers it, or let the path throu
 cells with `ros2 param set /planner_node unknown_is_free true`. While the robot drives, the
 Planner Node plans again from its new position after every grid update.
 
+### Project 7: landmarks found on the way there and back
+
+After two runs, e.g. the way there and the way back, compare their landmarks from the
+directory the runs were started in (`robotics_ws`), naming the runs as in their files in
+`logs/` (way there first):
+
+```bash
+ros2 run day6pkg compare_landmarks 2026-10-27_16-40-12 2026-10-27_16-45-03
+```
+
+Each run's world frame starts at the robot's start pose of that run, so the way back's
+coordinates are turned around. The tool puts run B's landmarks in run A's frame through the
+odometry frame both runs share (^A T_B = ^A T_odom · (^B T_odom)⁻¹, from the
+`world_from_odom` saved with each grid), pairs each landmark with the nearest one of the
+other run if each is the other's nearest and they are at most `--max-distance` (0.3 m)
+apart, and prints each pair and the mean difference in their position:
+
+```
+  A L1 (-0.500, +1.500)  B L1 (-0.674, +1.365)  0.220 m apart
+  ...
+4 found in both (within 0.3 m): mean difference 0.157 m, mean offset B - A (-0.098, -0.029) m
+```
+
+`A L1` and `B L1` are the labels in each run's own images. The difference is the
+odometry's drift between the two runs plus how far RANSAC places the same corner each
+time; the mean offset shows whether it is mostly a shift in one direction. The tool also
+saves run A's map with both runs' landmarks (A red, B teal, a green line between the two of
+each pair) as `result/grid/<A>_vs_<B>_landmarks.png`. It reads the `_final` files, or
+`_latest` if a run did not end with Ctrl-C.
+
+Do not restart the robot between the two runs: that resets its odometry, and the runs no
+longer line up (few or no landmarks found in both).
+
 ### Project 6: occupancy grid while driving 1 m
 
 ```bash
@@ -249,6 +285,7 @@ ignores both `logs/` and `result/`.
 | `result/grid/<run>_grid_summary.png` | Viewer Node | The snapshots so far, side by side |
 | `result/grid/<run>_grid_latest.png`, `_grid_final.png` | Viewer Node | The image with the grid, the path, the landmarks and the planned path |
 | `result/grid/<run>_plan.png` | Viewer Node | The image with the latest planned path |
+| `result/grid/<A>_vs_<B>_landmarks.png` | `compare_landmarks` | Run A's map with both runs' landmarks, the pairs found in both linked |
 | `logs/<run>_grid_latest.npz`, `_grid_final.npz` | Grid Node | Log-odds, resolution, the pose of each update and ^world T_odom |
 | `logs/<run>_landmarks_latest.npz`, `_landmarks_final.npz` | Landmark Node | `corners` (K × 2), `segments` (N × 2 × 2), m, `resolution`, `frame` |
 | `logs/<run>_plan_latest.npz`, `_plan_final.npz` | Planner Node | The latest plan: `points` (N × 2, m, the path; empty if none), `length` (m), `straight`, `problem`, `start`, `goal`, `robot_radius`, `safety_margin`, `resolution`, `frame` |
@@ -456,11 +493,12 @@ Viewer Node (`viewer_node`):
 
 ## Testing without the robot
 
-- Unit tests of the grid, the landmark search and the planner, from this package's
-  directory (`robotics_ws/src/day6pkg`); the RANSAC tests are skipped without scikit-image:
+- Unit tests of the grid, the landmark search, the planner and the comparison of two runs,
+  from this package's directory (`robotics_ws/src/day6pkg`); the RANSAC tests are skipped
+  without scikit-image:
 
   ```bash
-  python3 -m pytest test/test_grid.py test/test_landmarks.py test/test_astar.py
+  python3 -m pytest test/test_grid.py test/test_landmarks.py test/test_astar.py test/test_compare.py
   ```
 
 - Record the topics once on the robot and replay them later into the Grid Node:
