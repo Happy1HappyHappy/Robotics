@@ -6,7 +6,8 @@ Task 1: the first scan is added with the sensor at the origin
 Task 2: as the robot drives, a scan is added after every update_distance of travel
 After every update it publishes the grid (/grid) and the sensor's path so far (/grid_path)
 for the nodes that use them (the Landmark Node, the Viewer Node, later path planning); it
-draws nothing itself. On shutdown it saves the grid as grid.npz (save_grid)
+draws nothing itself. It saves the grid as <log_dir>/<run>_grid.npz every save_period
+seconds while it changes, and on shutdown (save_grid)
 This node never moves the robot; drive it with day3pkg or the robot's drive_distance action
 """
 
@@ -33,6 +34,7 @@ from tf2_ros.buffer import Buffer
 # for the LiDAR's mounting on the robot (TF)
 from tf2_ros.transform_listener import TransformListener
 
+from day6pkg.helpers.files import run_name
 from day6pkg.helpers.occupancy_grid import OccupancyGrid
 
 
@@ -78,14 +80,19 @@ class GridNode(Node):
         self.declare_parameter('use_tf', True)              # LiDAR mounting from TF
         self.declare_parameter('mount_yaw', 90.0)           # deg, LiDAR yaw if use_tf is false
         self.declare_parameter('grid_frame', 'world')       # frame_id of /grid and /grid_path
-        self.declare_parameter('save_grid', True)           # save the grid as grid.npz on shutdown
-        self.declare_parameter('output_dir', '.')           # where grid.npz is saved
+        self.declare_parameter('save_grid', True)           # save the grid as <run>_grid.npz
+        self.declare_parameter('save_period', 10.0)         # s between saves; 0: on shutdown only
+        self.declare_parameter('log_dir', 'logs')           # where the .npz files are saved
+        self.declare_parameter('run_id', '')                # names the files; '' = start time
 
         self.grid_ = OccupancyGrid(self.get_parameter('size').value,
                                    self.get_parameter('resolution').value)
         self.save_grid_ = self.get_parameter('save_grid').value
+        log_dir = self.get_parameter('log_dir').value
+        self.npz_path_ = os.path.join(
+            log_dir, f'{run_name(self.get_parameter("run_id").value)}_grid.npz')
         if self.save_grid_:
-            os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
+            os.makedirs(log_dir, exist_ok=True)
 
         # the LiDAR's mounting comes from the robot's static transforms (/tf_static)
         self.tf_buffer_ = Buffer()  # store the transforms, so they can be looked up later
@@ -101,6 +108,7 @@ class GridNode(Node):
         self.start_xy_ = None           # robot position (x, y) at the first update, odom frame
         self.next_update_ = 0.0         # m of travel at which the next scan is added
         self.poses_ = []                # (sensor x, y, robot heading) per update, world frame
+        self.saved_updates_ = 0         # number of updates in the last saved .npz
 
         self.odom_sub_ = self.create_subscription(
             Odometry, 'odom', self.odom_callback, qos_profile_sensor_data)
@@ -110,7 +118,11 @@ class GridNode(Node):
         latest = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.grid_pub_ = self.create_publisher(GridMsg, 'grid', latest)
         self.path_pub_ = self.create_publisher(Path, 'grid_path', latest)
-        self.get_logger().info('Grid Node ready, waiting for /scan and /odom')
+        period = self.get_parameter('save_period').value
+        if self.save_grid_ and period > 0.0:
+            self.save_timer_ = self.create_timer(period, self.save_grid)
+        self.get_logger().info('Grid Node ready, waiting for /scan and /odom' +
+                               (f'; saving to {self.npz_path_}' if self.save_grid_ else ''))
 
     # ---------- odometry ----------
     def odom_callback(self, msg: Odometry):
@@ -238,20 +250,22 @@ class GridNode(Node):
         self.path_pub_.publish(msg)
 
     # ---------- saving ----------
-    def save_final(self):
+    def save_grid(self):
         """
-        Save the grid as it is now as grid.npz (if save_grid), with the poses and
-        ^world T_odom, so two runs can be compared later
+        Save the grid as it is now as <log_dir>/<run>_grid.npz (if save_grid and it changed
+        since the last save), with the poses and ^world T_odom, so two runs can be compared
+        later; runs every save_period seconds and on shutdown, and replaces the file whole,
+        so a crash leaves the last complete save
         """
-        if not self.poses_ or not self.save_grid_:      # no update yet, or not wanted
-            return
-        path = os.path.join(self.get_parameter('output_dir').value, 'grid.npz')
+        if not self.save_grid_ or len(self.poses_) == self.saved_updates_:
+            return                  # not wanted, or nothing new (no update yet at all)
         try:
-            self.grid_.save(path, poses=np.array(self.poses_),
+            self.grid_.save(self.npz_path_, poses=np.array(self.poses_),
                             world_from_odom=self.world_from_odom_)
-            self.get_logger().info(f'Saved {path}')
+            self.saved_updates_ = len(self.poses_)
+            self.get_logger().info(f'Saved {self.npz_path_} ({self.saved_updates_} updates)')
         except OSError as e:
-            self.get_logger().warn(f'Could not save {path}: {e}')
+            self.get_logger().warn(f'Could not save {self.npz_path_}: {e}')
 
 
 def main(args=None):
@@ -267,7 +281,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.save_final()
+        node.save_grid()
         node.destroy_node()
         rclpy.try_shutdown()
 

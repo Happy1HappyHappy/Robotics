@@ -3,6 +3,7 @@ Draw an occupancy grid as an image with OpenCV
 """
 
 import math
+import os
 
 import cv2
 import numpy as np
@@ -86,3 +87,16 @@ def summary_image(images, gap=6):
     for img in images:
         parts += [img, spacer]
     return np.hstack(parts[:-1])
+
+
+def save_png(path, img):
+    """
+    Write img to path (.png) through a temporary file renamed over it, so an older image
+    at path is replaced whole (see files.py); returns whether it was written
+    """
+    root, ext = os.path.splitext(path)
+    tmp = f'{root}.tmp{ext}'            # same extension: cv2 picks the format from it
+    if not cv2.imwrite(tmp, img):
+        return False
+    os.replace(tmp, path)
+    return True

@@ -3,11 +3,18 @@ Tests of the occupancy grid (no ROS, no robot): python3 -m pytest test/test_grid
 """
 
 import math
+import re
 
 import numpy as np
 import pytest
 
+from day6pkg.helpers.files import run_name
 from day6pkg.helpers.occupancy_grid import bresenham, log_odds, OccupancyGrid
+
+
+def test_run_name_is_the_given_id_or_the_start_time():
+    assert run_name('there') == 'there'
+    assert re.fullmatch(r'\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d', run_name())   # 2026-10-27_16-40-12
 
 
 @pytest.mark.parametrize('end', [(5, 2), (2, 5), (-5, 2), (2, -5), (-3, -3), (0, 4), (4, 0)])
@@ -90,6 +97,15 @@ def test_save_and_load_keep_the_grid_and_the_extra_arrays(tmp_path):
     assert np.array_equal(loaded.log_odds, g.log_odds)
     assert np.array_equal(extra['poses'], poses)
     assert np.array_equal(extra['world_from_odom'], np.eye(3))
+
+
+def test_saving_again_replaces_the_file_and_leaves_no_temporary_file(tmp_path):
+    g = OccupancyGrid(20, 0.05)
+    g.save(tmp_path / 'grid.npz')                       # the first periodic save
+    g.log_odds[1, 2] = -0.954
+    g.save(tmp_path / 'grid.npz')                       # a later one replaces it
+    assert OccupancyGrid.load(tmp_path / 'grid.npz')[0].log_odds[1, 2] == -0.954
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['grid.npz']
 
 
 @pytest.mark.parametrize('size', [300, 5])

@@ -3,8 +3,10 @@ Viewer node for the day6pkg package (Projects 6 and 7)
 Draws what the other nodes publish, and nothing else does any drawing: the grid (/grid) with
 the sensor's path (/grid_path), the wall segments (/wall_segments) and the corner landmarks
 (/landmarks) on top, shown in a window
-Saves the image at each snapshot distance of travel (with a summary of them side by side),
-and the last one as grid_final.png on shutdown (save_images)
+Saves the image to <result_dir>/grid/ as <run>_grid_<distance>m.png at each snapshot
+distance of travel (with <run>_grid_summary.png, all of them side by side), and the latest
+one as <run>_grid_final.png every save_period seconds while it changes and on shutdown
+(save_images)
 Without this node the others run the same; without the Landmark Node it draws the grid only
 """
 
@@ -24,8 +26,9 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker               # the wall segments (/wall_segments)
 
+from day6pkg.helpers.files import run_name
 from day6pkg.helpers.occupancy_grid import OccupancyGrid
-from day6pkg.helpers.render import map_image, summary_image
+from day6pkg.helpers.render import map_image, save_png, summary_image
 
 WINDOW = 'Occupancy grid'
 
@@ -42,12 +45,16 @@ class ViewerNode(Node):
         self.declare_parameter('distance_tolerance', 0.03)  # m, this short of a distance counts
         self.declare_parameter('image_scale', 3)            # image pixels per cell side
         self.declare_parameter('display', True)             # show the image in a window
-        self.declare_parameter('save_images', True)         # save snapshots and grid_final.png
-        self.declare_parameter('output_dir', '.')           # where the images are saved
+        self.declare_parameter('save_images', True)         # save snapshots and the final image
+        self.declare_parameter('save_period', 10.0)         # s between saves; 0: on shutdown only
+        self.declare_parameter('result_dir', 'result')      # the images go to its grid/ folder
+        self.declare_parameter('run_id', '')                # names the files; '' = start time
 
         self.save_ = self.get_parameter('save_images').value
+        self.image_dir_ = os.path.join(self.get_parameter('result_dir').value, 'grid')
+        self.run_ = run_name(self.get_parameter('run_id').value)
         if self.save_:
-            os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
+            os.makedirs(self.image_dir_, exist_ok=True)
 
         self.grid_msg_ = None           # latest /grid
         self.path_msg_ = None           # latest /grid_path
@@ -59,6 +66,7 @@ class ViewerNode(Node):
         self.changed_ = False           # something new to draw
         self.snapshots_ = {}            # snapshot distance (m) -> image
         self.image_ = None
+        self.unsaved_ = False           # the image changed since grid_final.png was saved
         self.window_open_ = False
 
         latest = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -67,12 +75,18 @@ class ViewerNode(Node):
         self.create_subscription(PoseArray, 'landmarks', self.landmark_callback, latest)
         self.create_subscription(Marker, 'wall_segments', self.segment_callback, latest)
         self.draw_timer_ = self.create_timer(0.1, self.draw_callback)
+        period = self.get_parameter('save_period').value
+        if self.save_ and period > 0.0:
+            self.save_timer_ = self.create_timer(period, self.save_latest)
 
         self.display_ = self.get_parameter('display').value
         if self.display_ and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
             self.get_logger().warn('No display found; images are only saved to files')
             self.display_ = False
-        self.get_logger().info('Viewer Node ready, waiting for /grid')
+        self.get_logger().info(
+            'Viewer Node ready, waiting for /grid' +
+            (f'; saving to {os.path.join(self.image_dir_, self.run_)}_grid_*.png'
+             if self.save_ else ''))
 
     # ---------- subscriptions: store only ----------
     def grid_callback(self, msg: GridMsg):
@@ -122,6 +136,7 @@ class ViewerNode(Node):
                 self.image_ = map_image(self.grid_, self.get_parameter('image_scale').value,
                                         self.poses_, self.segments_, self.corners_,
                                         self.label())
+                self.unsaved_ = True
                 if update and self.save_:
                     self.save_snapshots()
         if self.display_ and self.image_ is not None:
@@ -184,20 +199,23 @@ class ViewerNode(Node):
 
     def save_image(self, name, img):
         """
-        Write an image to output_dir, logging the path or the failure
+        Write an image as <result_dir>/grid/<run>_<name> (replacing an older one whole),
+        logging the path or the failure; returns whether it was written
         """
-        path = os.path.join(self.get_parameter('output_dir').value, name)
-        if cv2.imwrite(path, img):
+        path = os.path.join(self.image_dir_, f'{self.run_}_{name}')
+        if save_png(path, img):
             self.get_logger().info(f'Saved {path}')
-        else:
-            self.get_logger().warn(f'Could not save {path}')
+            return True
+        self.get_logger().warn(f'Could not save {path}')
+        return False
 
-    def save_final(self):
+    def save_latest(self):
         """
-        Save the last image as grid_final.png (if save_images)
+        Save the latest image as <run>_grid_final.png (if save_images and it changed since
+        the last save); runs every save_period seconds and on shutdown
         """
-        if self.save_ and self.image_ is not None:
-            self.save_image('grid_final.png', self.image_)
+        if self.save_ and self.unsaved_ and self.save_image('grid_final.png', self.image_):
+            self.unsaved_ = False
 
 
 def main(args=None):
@@ -213,7 +231,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.save_final()
+        node.save_latest()
         if node.window_open_:
             cv2.destroyAllWindows()
         node.destroy_node()

@@ -1,5 +1,6 @@
 # Project 7 parameters for the Grid Node, the Landmark Node and the Viewer Node
-# Used by launch/project7_launch.py; output_dir comes from its run argument (run_a, run_b)
+# Used by launch/project7_launch.py, which names each run (run_id) after its start time
+# Files: logs/<run>_grid.npz, logs/<run>_landmarks.npz, result/grid/<run>_grid_*.png
 # The Grid Node and the Landmark Node only compute and publish; the Viewer Node draws
 grid_node:
   ros__parameters:
@@ -19,7 +20,9 @@ grid_node:
 
     # ----- output -----
     grid_frame: world                           # frame_id of /grid and /grid_path
-    save_grid: true                             # save the grid as grid.npz on shutdown
+    save_grid: true                             # save the grid as <run>_grid.npz
+    save_period: 10.0                           # s between saves while it changes; 0: on shutdown only
+    log_dir: logs                               # <run>_grid.npz goes here
 
 landmark_node:
   ros__parameters:
@@ -38,7 +41,9 @@ landmark_node:
 
     # ----- output -----
     period: 1.0                                 # s, how often to look for a new grid
-    save: true                                  # save landmarks.npz on shutdown
+    save: true                                  # save <run>_landmarks.npz
+    save_period: 10.0                           # s between saves while they change; 0: on shutdown only
+    log_dir: logs                               # <run>_landmarks.npz goes here
 
 viewer_node:
   ros__parameters:
@@ -46,4 +51,6 @@ viewer_node:
     distance_tolerance: 0.03                    # m, stopping this short counts as reached
     image_scale: 3                              # image pixels per cell side
     display: true                               # show the image in a window
-    save_images: true                           # save the snapshots and grid_final.png
+    save_images: true                           # save the snapshots and <run>_grid_final.png
+    save_period: 10.0                           # s between final image saves; 0: on shutdown only
+    result_dir: result                          # the images go to result/grid/

@@ -1,9 +1,11 @@
 """
 Launch file for Project 7: the Grid Node, the Landmark Node and the Viewer Node, with
 config/project7.yaml
-ros2 launch day6pkg project7_launch.py run:=run_a    (then run:=run_b for the way back)
+ros2 launch day6pkg project7_launch.py
+Each launch is one run, named after its start time (run_id:= names it yourself); all nodes
+name their files after it, like log files: logs/<run>_grid.npz, logs/<run>_landmarks.npz,
+result/grid/<run>_grid_*.png, saved every save_period seconds and on Ctrl-C
 draw:=false leaves the Viewer Node out: the other two run the same, nothing is drawn
-All of them save to the run's folder when the launch is stopped with Ctrl-C
 """
 
 import os
@@ -14,6 +16,9 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
+from day6pkg.helpers.files import run_name
 
 
 def generate_launch_description():
@@ -23,13 +28,14 @@ def generate_launch_description():
     """
     ld = LaunchDescription()
     config = os.path.join(get_package_share_directory('day6pkg'), 'config', 'project7.yaml')
-    run = LaunchConfiguration('run')    # the folder this run is saved to
+    # the run's name, read as text even if it looks like a number or a date
+    run_id = ParameterValue(LaunchConfiguration('run_id'), value_type=str)
 
-    ld.add_action(DeclareLaunchArgument('run', default_value='run_a',
-                                        description='folder this run is saved to'))
+    ld.add_action(DeclareLaunchArgument('run_id', default_value=run_name(),
+                                        description='name of this run (default: start time)'))
     ld.add_action(DeclareLaunchArgument('draw', default_value='true',
                                         description='start the Viewer Node'))
-    # parameters: the YAML file first, then output_dir from the run argument on top of it
+    # parameters: the YAML file first, then the run's name on top of it
     for executable, name, condition in (('grid_node', 'grid_node', None),
                                         ('landmark_node', 'landmark_node', None),
                                         ('viewer_node', 'viewer_node',
@@ -39,7 +45,7 @@ def generate_launch_description():
             executable=executable,
             name=name,
             output='screen',
-            parameters=[config, {'output_dir': run}],
+            parameters=[config, {'run_id': run_id}],
             condition=condition,
         ))
     return ld

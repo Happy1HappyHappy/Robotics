@@ -10,6 +10,10 @@ build/
 install/
 log/
 
+# day6pkg run outputs (saved like logs, one set of files per run)
+logs/
+result/
+
 # Editors
 .vscode/
 .idea/
