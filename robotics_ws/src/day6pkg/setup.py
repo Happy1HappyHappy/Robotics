@@ -32,6 +32,7 @@ setup(
             'landmark_node = day6pkg.nodes.landmark_node:main',
             'planner_node = day6pkg.nodes.planner_node:main',
             'viewer_node = day6pkg.nodes.viewer_node:main',
+            'compare_landmarks = day6pkg.tools.compare_landmarks:main',
         ],
     },
 )

@@ -14,6 +14,8 @@ SENSOR_COLOR = (0, 0, 255)      # red
 TEXT_COLOR = (0, 0, 0)          # black
 SEGMENT_COLOR = (0, 140, 255)   # orange
 PLAN_COLOR = (255, 0, 255)      # magenta
+OTHER_COLOR = (200, 120, 0)     # teal blue: the landmarks of the run compared
+MATCH_COLOR = (0, 160, 0)       # green: between a landmark and the same one in the other run
 # cells the robot's center must not enter are multiplied by this: white turns light
 # magenta, gray darker, black stays black
 BLOCKED_TINT = np.array([1.0, 0.7, 1.0])
@@ -92,6 +94,26 @@ def map_image(grid, scale=3, poses=(), segments=(), corners=(), label='', blocke
         cv2.circle(img, (int(u), int(v)), 6, PLAN_COLOR, 2)
         cv2.putText(img, 'goal', (int(u) + 8, int(v) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                     PLAN_COLOR, 1, cv2.LINE_AA)
+    return img
+
+
+def comparison_image(grid, scale=3, poses=(), segments=(), corners=(), other=(), pairs=(),
+                     label=''):
+    """
+    The map image of one run (see map_image: its grid, path, segments and landmarks L1, L2,
+    ... in red) with another run's landmarks on top (other: K x 2, m, in this run's frame) as
+    teal circles numbered below them, and a green line between the two landmarks of each
+    pair (i, j, d) found in both: corners[i] and other[j]
+    """
+    img = map_image(grid, scale, poses, segments, corners, label)
+    for i, j, _ in pairs:
+        cv2.line(img, world_to_pixel(grid, *corners[i], scale),
+                 world_to_pixel(grid, *other[j], scale), MATCH_COLOR, 2)
+    for k, (x, y) in enumerate(other, 1):
+        u, v = world_to_pixel(grid, x, y, scale)
+        cv2.circle(img, (u, v), 6, OTHER_COLOR, 2)
+        cv2.putText(img, f'L{k}', (u + 7, v + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, OTHER_COLOR,
+                    1, cv2.LINE_AA)
     return img
 
 
