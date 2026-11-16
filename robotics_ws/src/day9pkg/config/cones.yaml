@@ -1,0 +1,33 @@
+# Cone Node settings to tune in the lab. Use it from the workspace root (robotics_ws), so an
+# edit takes effect on the next run without rebuilding:
+#   ros2 run day9pkg cones --ros-args --params-file src/day9pkg/config/cones.yaml
+# Every other parameter keeps the default in day9pkg/cones.py.
+# Write decimals with a point (0.03, 90.0): ROS will not take 90 where a float is expected.
+cone_node:
+  ros__parameters:
+    # The three cones' colors, from: red, orange, yellow, green, blue, purple, pink
+    colors: ['orange', 'green', 'blue']
+
+    # HSV range of each color: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi], OpenCV's scale
+    # (H 0-179, S and V 0-255); h_lo > h_hi wraps through 0 (red). Click on a cone in the
+    # Cone Node's window to print its HSV, then set the range a little wider than that
+    hsv:
+      red: [170, 120, 70, 4, 255, 255]
+      orange: [5, 120, 100, 18, 255, 255]
+      yellow: [20, 100, 100, 35, 255, 255]
+      green: [40, 80, 50, 85, 255, 255]
+      blue: [95, 120, 50, 130, 255, 255]
+      purple: [131, 60, 50, 155, 255, 255]
+      pink: [156, 60, 120, 169, 255, 255]
+    min_area: 80              # px, a blob smaller than this is noise, not a cone
+
+    # Gap (m) to leave between the robot and the base of the cone (about an inch)
+    stop_gap: 0.025
+    # The LiDAR sees the cone about 19 cm above the floor, where it is narrower than at its
+    # base. Measure with a ruler, on your cone: half the base's width minus the cone's
+    # radius 19 cm up. The robot stops when the LiDAR's gap is stop_gap + this
+    cone_base_extra: 0.06
+
+    scan_speed: 0.3           # rad/s, Task 1's turn
+    max_linear_speed: 0.15    # m/s
+    max_angular_speed: 0.8    # rad/s
