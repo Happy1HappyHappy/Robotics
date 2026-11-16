@@ -3,7 +3,8 @@
 ROS 2 (Jazzy) colcon workspace for CS 5335 Robotic Science and Systems. `day2pkg`
 drives a TurtleBot 4 through `cmd_vel`; `day3pkg` drives it with the Create 3's
 built-in actions and reads `/odom`; `day6pkg` builds an occupancy grid from the LiDAR;
-`day7pkg` finds landmarks in two such grids and plans paths on them with A*.
+`day7pkg` finds landmarks in two such grids and plans paths on them with A*; `day9pkg`
+finds colored traffic cones with the camera and drives to them.
 
 ## Packages
 
@@ -14,6 +15,7 @@ built-in actions and reads `/odom`; `day6pkg` builds an occupancy grid from the 
 | `day3_interfaces`                  | 3, 4, 5 | Defines the `Drive.action` used by `day3pkg`                        |
 | [`day6pkg`](src/day6pkg/README.md) | 6, 7    | Grid Node: occupancy grid from the LiDAR, saved as image and data   |
 | [`day7pkg`](src/day7pkg/README.md) | 7       | RANSAC corner landmarks, aligning two grids, A* path planning       |
+| [`day9pkg`](src/day9pkg/README.md) | 9       | Cone Node: find colored cones by camera, drive to one with LiDAR    |
 
 See each package's README for details.
 
@@ -32,7 +34,8 @@ export ROS_DOMAIN_ID=8
 ## Build
 
 Some packages need system packages first: `day3pkg` needs the Create 3's messages
-(`irobot_create_msgs`) and `day6pkg` needs NumPy and OpenCV. To install everything the
+(`irobot_create_msgs`), `day6pkg` needs NumPy and OpenCV, and `day9pkg` also needs
+`cv_bridge`. To install everything the
 packages declare, run once from this directory (`robotics_ws`):
 
 ```bash
@@ -57,12 +60,14 @@ ros2 run day6pkg mapper              # Project 6 (Grid Node only)
 ros2 launch day6pkg day6_launch.py   # Project 6 with day3pkg's Driving + Executive
 ros2 run day7pkg landmarks run_a/grid.npz run_b/grid.npz   # Project 7, Task 2
 ros2 run day7pkg plan run_a/grid.npz --goal 2.2 0.7         # Project 7, Task 3
+ros2 run day9pkg cones --ros-args --params-file src/day9pkg/config/cones.yaml   # Project 9
 ```
 
 For Project 5 (odometry), see the
 [Odometry section of the day3pkg README](src/day3pkg/README.md#odometry); for
 Project 6, the [day6pkg README](src/day6pkg/README.md); for Project 7 (including how to
-record the two grids), the [day7pkg README](src/day7pkg/README.md).
+record the two grids), the [day7pkg README](src/day7pkg/README.md); for Project 9 (setting
+up the cones and tuning the colors), the [day9pkg README](src/day9pkg/README.md).
 
 ## Troubleshooting
 
