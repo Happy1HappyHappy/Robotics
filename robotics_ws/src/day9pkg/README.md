@@ -66,9 +66,18 @@ The code is in three files: `vision.py` (finding colors in an image, no ROS),
    floors, white walls and the cone's white stripe.
 3. **Clean it up.** An opening (erode, then dilate) removes specks of noise; a closing
    (dilate, then erode) fills small holes.
-4. **The largest region is the cone.** Regions smaller than `min_area` pixels are ignored.
-   A cone's white stripe cuts it into two pieces, one above the other, so pieces in the same
-   columns are joined back into one blob.
+4. **The largest cone-shaped region is the cone.** Regions smaller than `min_area` pixels
+   are ignored. A cone's white stripe cuts it into two pieces, one above the other, so
+   pieces in the same columns are joined back into one blob. Regions are tried from the
+   largest down, and the first one shaped like a cone wins (`shape_check`, on by default):
+   - height / width within `[min_aspect, max_aspect]`;
+   - **taper** (1 - top third's width / bottom third's width) of at least `min_taper`: a
+     cone is narrower at the top, while a box or a ball is about 0;
+   - left-right **symmetry** of at least `min_symmetry`;
+   - **solidity** (pixel count / convex hull area) of at least `min_solidity`.
+
+   So a red box or a blue ball next to the cones is skipped. With `shape_check: false`, the
+   largest region of the color counts, whatever its shape.
 5. **Which way it is.** With the pinhole camera model from class, a point x to the side at
    depth z lands on image column u = cx + fx·x / z. So the blob's center column u is at the
    angle atan((cx − u) / fx) from straight ahead (+ = left). The focal length fx and center
@@ -171,8 +180,10 @@ Arrived: about 2.3 cm from the base of the blue cone (7.5 cm at the height of th
 Task 1 saves each cone's best camera image, with its color name boxed, as
 `cone_<color>.png` in `output_dir` (default: the current directory).
 
-The camera window (`Cones`) shows the live image with each color's blob boxed and a yellow line
-at the image's center. Turn it off with `-p display:=false` (for example over SSH).
+The camera window (`Cones`) shows the live image with each color's cone boxed and a yellow
+line at the image's center. It runs in a thread of its own, so a slow window cannot hold up
+the odometry and scans while the robot moves. Turn it off with `-p display:=false` (for
+example over SSH).
 
 ## Tune it in the lab
 
@@ -184,6 +195,11 @@ All of these are in `config/cones.yaml`; edit, then run again (no rebuild).
    wider than what you see (about ±5 in H, and S and V lower limits 30-50 below), and check
    in the window that each cone gets a box and nothing else does. If a color is boxed on
    something that is not a cone, narrow its range or raise `min_area`.
+
+   Then the shape: if a cone of the right color gets no box, loosen the shape limits (for
+   a short, wide cone, lower `min_aspect`; for a cone with a wide white stripe, lower
+   `min_solidity`). To check whether the shape is what stops it, run once with
+   `-p shape_check:=false`.
 2. **`cone_base_extra`.** On one cone, measure half the base's width, and the cone's radius
    about 19 cm up (half its width there). `cone_base_extra` is the difference. For a square
    base, the half-width depends on which way the cone is turned, so use the larger
@@ -234,4 +250,5 @@ Not yet tested on the robot or built with colcon. Check these first:
 | The LiDAR's height (the cones must be taller) | `ros2 run tf2_ros tf2_echo base_link rplidar_link` |
 | The camera is on the robot's center line and faces straight ahead (the direction math assumes it) | `ros2 run tf2_ros tf2_echo base_link oakd_rgb_camera_frame` (y ≈ 0, no yaw; frame names from `ros2 run tf2_tools view_frames`) |
 | `cv_bridge` is installed | `python3 -c "import cv_bridge"` |
-| The camera window opens (it is drawn from the background thread) | if not, run with `-p display:=false` and look at `cone_<color>.png` |
+| The camera window opens (it is drawn in its own thread) | if not, run with `-p display:=false` and look at `cone_<color>.png` |
+| If Task 1 stops partway through the turn, the message says why: `odometry (odom) stopped arriving` (data late over Wi-Fi), `... detected` (a hazard), or `the turn took too long` | the text after `Task 1 stopped:` |

@@ -23,6 +23,7 @@ from geometry_msgs.msg import TwistStamped
 from irobot_create_msgs.msg import HazardDetection, HazardDetectionVector
 from nav_msgs.msg import Odometry
 import numpy as np
+from rcl_interfaces.msg import FloatingPointRange, ParameterDescriptor
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
@@ -36,7 +37,16 @@ from tf2_ros.transform_listener import TransformListener
 
 from day9pkg import geometry as geo
 from day9pkg.vision import (blob_bearings, DEFAULT_HSV, draw_blobs, find_blobs,
-                            focal_from_fov, pixel_bearing)
+                            focal_from_fov, pixel_bearing, ShapeLimits)
+
+SHAPE_PARAMETERS = (    # (name, low, high, description) of the vision.ShapeLimits fields
+    ('min_aspect', 0.05, 10.0, 'Smallest cone height / width'),
+    ('max_aspect', 0.05, 10.0, 'Largest cone height / width'),
+    ('min_taper', 0.0, 1.0, 'Smallest 1 - (top width / bottom width); a cone is narrower '
+     'at the top'),
+    ('min_symmetry', 0.0, 1.0, 'Smallest left-right symmetry (0-1)'),
+    ('min_solidity', 0.0, 1.0, 'Smallest pixel count / convex hull area'),
+)
 
 WINDOW = 'Cones'
 FULL_TURN = 2.0 * math.pi
@@ -164,6 +174,15 @@ class ConeNode(Node):
         self.declare_parameter('display', True)         # show the camera in a window
         self.declare_parameter('display_scale', 2)      # window pixels per image pixel
         self.declare_parameter('output_dir', '.')       # where the cone images are saved
+        self.declare_parameter('shape_check', True, ParameterDescriptor(
+            description='Only count regions shaped like a cone (taller than a sliver, '
+                        'narrower at the top, symmetric), so boxes and balls are skipped',
+            read_only=True))
+        defaults = ShapeLimits()
+        for name, low, high, description in SHAPE_PARAMETERS:
+            self.declare_parameter(name, getattr(defaults, name), ParameterDescriptor(
+                description=description, read_only=True,
+                floating_point_range=[FloatingPointRange(from_value=low, to_value=high)]))
 
         self.colors_ = [c.lower() for c in self.get_parameter('colors').value]
         unknown = [c for c in self.colors_ if c not in DEFAULT_HSV]
@@ -174,6 +193,12 @@ class ConeNode(Node):
             if len(hsv) != 6:
                 raise ValueError(f'hsv.{c} needs 6 numbers: h_lo s_lo v_lo h_hi s_hi v_hi')
         self.min_area_ = self.get_parameter('min_area').value
+        self._shape = None      # ShapeLimits, or None to accept any shape
+        if self.get_parameter('shape_check').value:
+            self._shape = ShapeLimits(**{name: self.get_parameter(name).value
+                                         for name, *_ in SHAPE_PARAMETERS})
+            if self._shape.min_aspect > self._shape.max_aspect:
+                raise ValueError('min_aspect is above max_aspect')
         self.hfov_ = math.radians(self.get_parameter('hfov').value)
         self.scan_speed_ = self.get_parameter('scan_speed').value
         self.center_tolerance_ = math.radians(self.get_parameter('center_tolerance').value)
@@ -225,10 +250,16 @@ class ConeNode(Node):
 
         self.window_open_ = False
         self.shown_seq_ = -1
-        self.display_timer_ = None
+        # The window runs in a thread of its own, not in the ROS executor: drawing it must
+        # never hold up the odometry, scan and image callbacks. If it did for longer than
+        # data_timeout, the robot would stop mid-turn as if odometry had stopped arriving.
+        self._display_stop = threading.Event()
+        self._display_thread = None
         if self.get_parameter('display').value:
             if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
-                self.display_timer_ = self.create_timer(0.1, self.display_callback)
+                self._display_thread = threading.Thread(target=self._display_loop,
+                                                        daemon=True)
+                self._display_thread.start()
             else:
                 self.get_logger().warn('No display found; the camera window is off')
 
@@ -316,18 +347,33 @@ class ConeNode(Node):
         self.get_logger().info(f'LiDAR on the robot: x={x:.3f} m, y={y:.3f} m, yaw={yaw:.1f} deg')
         return self.mount_
 
-    # ---------- camera window (background thread) ----------
+    # ---------- camera window (its own thread) ----------
+    def _display_loop(self):
+        """Show the camera window until close_display() is called (runs in its own thread)."""
+        while not self._display_stop.is_set() and self.display_callback():
+            time.sleep(0.05)
+        if self.window_open_:
+            cv2.destroyAllWindows()
+
+    def close_display(self):
+        """Stop the camera window's thread, which closes the window."""
+        self._display_stop.set()
+        if self._display_thread is not None:
+            self._display_thread.join(timeout=1.0)
+
     def display_callback(self):
         """
-        Show the latest image with each color's blob boxed and the image's center line
-        cv2.waitKey lets the window draw itself and handle clicks
+        Show the latest image with each color's blob boxed and the image's center line.
+
+        cv2.waitKey lets the window draw itself and handle clicks. Return False if the
+        window cannot be shown (it is then turned off), True otherwise.
         """
         frame = self.frame_
         try:
             if frame is not None and frame.seq != self.shown_seq_:
                 self.shown_seq_ = frame.seq
-                img = draw_blobs(frame.bgr, find_blobs(frame.bgr, self.hsv_, self.min_area_),
-                                 highlight=self.target_)
+                blobs = find_blobs(frame.bgr, self.hsv_, self.min_area_, self._shape)
+                img = draw_blobs(frame.bgr, blobs, highlight=self.target_)
                 _, cx = self.camera_model(img.shape[1])
                 cv2.line(img, (int(round(cx)), 0), (int(round(cx)), img.shape[0] - 1),
                          (0, 255, 255), 1)
@@ -341,7 +387,8 @@ class ConeNode(Node):
                 cv2.waitKey(1)
         except cv2.error as e:
             self.get_logger().warn(f'Cannot show the camera window ({e}); turning it off')
-            self.display_timer_.cancel()
+            return False
+        return True
 
     def on_click(self, event, x, y, flags, param):
         """
@@ -461,7 +508,8 @@ class ConeNode(Node):
         """
         The largest blob of one color in an image, or None
         """
-        return find_blobs(bgr, {color: self.hsv_[color]}, self.min_area_).get(color)
+        return find_blobs(bgr, {color: self.hsv_[color]}, self.min_area_,
+                          self._shape).get(color)
 
     def wait_for_data(self, timeout=30.0):
         """
@@ -538,7 +586,7 @@ class ConeNode(Node):
         """
         Keep each color's blob in this image if it is the best sighting of that color so far
         """
-        blobs = find_blobs(frame.bgr, self.hsv_, self.min_area_)
+        blobs = find_blobs(frame.bgr, self.hsv_, self.min_area_, self._shape)
         width = frame.bgr.shape[1]
         fx, cx = self.camera_model(width)
         for color, blob in blobs.items():
@@ -836,9 +884,8 @@ def main(args=None):
         pass
     finally:
         node.stop()
+        node.close_display()
         executor.shutdown()
-        if node.window_open_:
-            cv2.destroyAllWindows()
         node.destroy_node()
         rclpy.try_shutdown()
 

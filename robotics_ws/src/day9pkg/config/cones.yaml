@@ -21,6 +21,15 @@ cone_node:
       pink: [156, 60, 120, 169, 255, 255]
     min_area: 80              # px, a blob smaller than this is noise, not a cone
 
+    # Shape: a region of a cone's color must also look like a cone, so a box or a ball of
+    # that color is skipped. Turn off with shape_check: false to go by color only
+    shape_check: true
+    min_aspect: 0.4           # height / width (short training cones are wide)
+    max_aspect: 3.0
+    min_taper: 0.2            # 1 - top width / bottom width: narrower at the top
+    min_symmetry: 0.6         # left-right symmetry, 0-1
+    min_solidity: 0.7         # pixel count / convex hull area (a white stripe lowers it)
+
     # Gap (m) to leave between the robot and the base of the cone (about an inch)
     stop_gap: 0.025
     # The LiDAR sees the cone about 19 cm above the floor, where it is narrower than at its

@@ -45,6 +45,69 @@ class Blob:
     area: int
 
 
+@dataclass
+class ShapeLimits:
+    """
+    What a region must look like to count as a cone.
+
+    Its height / width is within [min_aspect, max_aspect]; its taper (narrower at the top),
+    left-right symmetry and solidity reach min_taper, min_symmetry and min_solidity. See
+    shape_features for what each measures.
+    """
+
+    min_aspect: float = 0.4
+    max_aspect: float = 3.0
+    min_taper: float = 0.2
+    min_symmetry: float = 0.6
+    min_solidity: float = 0.7
+
+
+def shape_features(region):
+    """
+    Return the shape features of a region (a 2D boolean array, True = in the region).
+
+    aspect is its height / width. taper is 1 - (mean width of the top third of its rows) /
+    (mean width of the bottom third), large for a cone, about 0 for a box or a ball.
+    symmetry is 1 - (mean difference between each row's left and right extent from the
+    central axis) / (mean width), 1 for a perfectly symmetric shape. solidity is its pixel
+    count / its convex hull's area; a white stripe across a cone lowers it a little.
+    """
+    region = np.asarray(region, dtype=bool)
+    height, width = region.shape
+    present = region.any(axis=1)
+    if not present.any():
+        return {'aspect': 0.0, 'taper': 0.0, 'symmetry': 0.0, 'solidity': 0.0}
+    left = np.argmax(region, axis=1)
+    right = width - 1 - np.argmax(region[:, ::-1], axis=1)
+    widths = np.where(present, right - left + 1, 0).astype(float)
+
+    def mean_width(part):
+        part = part[part > 0]
+        return float(part.mean()) if len(part) else 0.0
+
+    third = max(1, height // 3)
+    bottom = mean_width(widths[-third:])
+    taper = 1.0 - mean_width(widths[:third]) / bottom if bottom > 0.0 else 0.0
+    axis = float(np.nonzero(region)[1].mean())
+    left_extent = axis - left[present] + 0.5
+    right_extent = right[present] - axis + 0.5
+    symmetry = 1.0 - (float(np.mean(np.abs(left_extent - right_extent)))
+                      / float(np.mean(left_extent + right_extent)))
+    points = np.argwhere(region)[:, ::-1].astype(np.int32)
+    hull_area = cv2.contourArea(cv2.convexHull(points))
+    solidity = min(1.0, region.sum() / hull_area) if hull_area > 0.0 else 0.0
+    return {'aspect': height / width, 'taper': taper, 'symmetry': symmetry,
+            'solidity': solidity}
+
+
+def cone_shaped(region, limits):
+    """Return whether a region (2D boolean array) passes the cone shape checks."""
+    f = shape_features(region)
+    return (limits.min_aspect <= f['aspect'] <= limits.max_aspect
+            and f['taper'] >= limits.min_taper and f['symmetry'] >= limits.min_symmetry
+            and f['solidity'] >= limits.min_solidity)
+
+
 def color_mask(hsv, hsv_range):
     """
     Mask (uint8, 255 = in range) of the pixels of an HSV image that are within hsv_range
@@ -62,46 +125,56 @@ def color_mask(hsv, hsv_range):
     return cv2.bitwise_or(top, bottom)
 
 
-def largest_blob(mask, min_area):
+def largest_blob(mask, min_area, shape=None):
     """
-    Largest connected region of a mask after cleaning it up, together with the other pieces
-    above or below it (a cone's white stripe splits it into pieces stacked in the same
-    columns); None if the largest has fewer than min_area pixels
+    Return the largest cone-like region of a mask after cleaning it up, or None.
+
+    A region is a connected piece together with the other pieces above or below it (a
+    cone's white stripe splits it into pieces stacked in the same columns). Regions are
+    tried from the largest down; with shape (ShapeLimits), the first one shaped like a cone
+    is returned, so a larger box or ball of the same color is skipped. Without shape, the
+    largest is returned. Pieces smaller than min_area pixels are not tried.
     """
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, OPEN_KERNEL)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, CLOSE_KERNEL)
-    n, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if n <= 1:                  # label 0 is the background
         return None
     areas = stats[:, cv2.CC_STAT_AREA]
-    i = 1 + int(np.argmax(areas[1:]))
-    if areas[i] < min_area:
-        return None
     lefts = stats[:, cv2.CC_STAT_LEFT]
     rights = lefts + stats[:, cv2.CC_STAT_WIDTH]
     tops = stats[:, cv2.CC_STAT_TOP]
     bottoms = tops + stats[:, cv2.CC_STAT_HEIGHT]
-    # pieces whose columns overlap the largest one's, and not just specks
-    parts = [j for j in range(1, n) if lefts[j] < rights[i] and rights[j] > lefts[i]
-             and areas[j] >= min_area / 4]
-    weights = areas[parts].astype(float)
-    return Blob(u=float(np.average(centroids[parts, 0], weights=weights)),
-                v=float(np.average(centroids[parts, 1], weights=weights)),
-                left=int(lefts[parts].min()), top=int(tops[parts].min()),
-                right=int(rights[parts].max()), bottom=int(bottoms[parts].max()),
-                area=int(weights.sum()))
+    for i in 1 + np.argsort(-areas[1:], kind='stable'):
+        if areas[i] < min_area:
+            return None
+        # pieces whose columns overlap this one's, and not just specks
+        parts = [j for j in range(1, n) if lefts[j] < rights[i] and rights[j] > lefts[i]
+                 and areas[j] >= min_area / 4]
+        left, top = int(lefts[parts].min()), int(tops[parts].min())
+        right, bottom = int(rights[parts].max()), int(bottoms[parts].max())
+        if shape is not None and not cone_shaped(
+                np.isin(labels[top:bottom, left:right], parts), shape):
+            continue
+        weights = areas[parts].astype(float)
+        return Blob(u=float(np.average(centroids[parts, 0], weights=weights)),
+                    v=float(np.average(centroids[parts, 1], weights=weights)),
+                    left=left, top=top, right=right, bottom=bottom, area=int(weights.sum()))
+    return None
 
 
-def find_blobs(bgr, hsv_ranges, min_area):
+def find_blobs(bgr, hsv_ranges, min_area, shape=None):
     """
-    The largest blob of each color in a BGR image, as {color name: Blob}; colors with no
-    blob of at least min_area pixels are left out
-    hsv_ranges: {color name: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi]}
+    Return the largest cone of each color in a BGR image, as {color name: Blob}.
+
+    hsv_ranges is {color name: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi]}. With shape
+    (ShapeLimits), only regions shaped like a cone count. Colors with no such region of at
+    least min_area pixels are left out.
     """
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     blobs = {}
     for name, hsv_range in hsv_ranges.items():
-        blob = largest_blob(color_mask(hsv, hsv_range), min_area)
+        blob = largest_blob(color_mask(hsv, hsv_range), min_area, shape)
         if blob is not None:
             blobs[name] = blob
     return blobs

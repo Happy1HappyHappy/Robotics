@@ -9,8 +9,9 @@ import cv2
 import numpy as np
 import pytest
 
-from day9pkg.vision import (blob_bearings, color_mask, DEFAULT_HSV, draw_blobs, find_blobs,
-                            focal_from_fov, largest_blob, pixel_bearing)
+from day9pkg.vision import (blob_bearings, color_mask, cone_shaped, DEFAULT_HSV, draw_blobs,
+                            find_blobs, focal_from_fov, largest_blob, pixel_bearing,
+                            shape_features, ShapeLimits)
 
 # a typical BGR value of each color, as a camera might see a cone of it
 SAMPLES = {
@@ -134,3 +135,71 @@ def test_draw_keeps_the_input_unchanged():
     out = draw_blobs(img, find_blobs(img, {'orange': DEFAULT_HSV['orange']}, 80), 'orange')
     assert np.array_equal(img, copy)
     assert out.shape == img.shape and not np.array_equal(out, img)
+
+
+SHAPE = ShapeLimits()
+
+
+def region(draw):
+    """Return the painted shape, cropped to its bounding box, as a 2D boolean array."""
+    mask = np.zeros((120, 120), np.uint8)
+    draw(mask)
+    rows, cols = np.nonzero(mask)
+    return mask[rows.min():rows.max() + 1, cols.min():cols.max() + 1] > 0
+
+
+def triangle(mask):
+    """Paint a cone: a triangle, narrow at the top."""
+    cv2.fillPoly(mask, [np.array([[60, 10], [85, 90], [35, 90]], np.int32)], 255)
+
+
+def training_cone(mask):
+    """Paint a short training cone: a trapezoid on a wide flat base."""
+    cv2.fillPoly(mask, [np.array([[52, 40], [68, 40], [80, 80], [40, 80]], np.int32)], 255)
+    cv2.rectangle(mask, (32, 80), (88, 88), 255, -1)
+
+
+def test_shape_features_of_a_cone():
+    f = shape_features(region(triangle))
+    assert f['taper'] > 0.6
+    assert f['symmetry'] > 0.9
+    assert f['solidity'] > 0.9
+    assert f['aspect'] == pytest.approx(81 / 51)
+
+
+@pytest.mark.parametrize('draw', [triangle, training_cone])
+def test_cones_pass_the_shape_checks(draw):
+    assert cone_shaped(region(draw), SHAPE)
+
+
+@pytest.mark.parametrize('draw', [
+    lambda m: cv2.rectangle(m, (30, 20), (80, 90), 255, -1),    # a box
+    lambda m: cv2.circle(m, (60, 60), 30, 255, -1),              # a ball
+    lambda m: cv2.rectangle(m, (10, 50), (110, 56), 255, -1),    # a flat sliver
+])
+def test_boxes_balls_and_slivers_fail_the_shape_checks(draw):
+    assert not cone_shaped(region(draw), SHAPE)
+
+
+def test_a_striped_cone_passes_the_shape_checks():
+    img = cone_image(SAMPLES['orange'], stripe=True)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    blob = largest_blob(color_mask(hsv, DEFAULT_HSV['orange']), 80, SHAPE)
+    assert blob is not None
+    assert blob.bottom - blob.top > 50     # both pieces, above and below the stripe
+
+
+def test_a_larger_box_of_the_same_color_is_skipped():
+    img = cone_image(SAMPLES['red'], u=180)
+    img[60:190, 20:100] = SAMPLES['red']                    # a big red box on the left
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = color_mask(hsv, DEFAULT_HSV['red'])
+    assert largest_blob(mask, 80).u < 100                   # without shape: the box
+    assert largest_blob(mask, 80, SHAPE).u == pytest.approx(180, abs=3)
+
+
+def test_a_ball_of_a_cone_color_is_not_a_cone():
+    img = np.full((250, 250, 3), GRAY, np.uint8)
+    cv2.circle(img, (125, 125), 30, SAMPLES['blue'], -1)
+    assert 'blue' in find_blobs(img, {'blue': DEFAULT_HSV['blue']}, 80)
+    assert find_blobs(img, {'blue': DEFAULT_HSV['blue']}, 80, SHAPE) == {}
