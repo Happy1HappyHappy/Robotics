@@ -1,0 +1,71 @@
+# Settings for the cone detector and navigator; cone_navigation_launch.py loads this file.
+# All values are starting points and must be checked on the real robot and cones (see
+# the README). Units are SI: m, s, rad, m/s, rad/s. Write decimals with a point (3.0, not
+# 3): ROS refuses an integer where a float is declared. Parameters not listed keep the
+# defaults documented in the README.
+
+cone_detector:
+  ros__parameters:
+    image_topic: oakd/rgb/preview/image_raw
+
+    # Colors to accept as targets; cones of any other color are ignored
+    target_colors: ['red', 'blue', 'green']
+    # HSV ranges, six numbers each: h_lo, s_lo, v_lo, h_hi, s_hi, v_hi (OpenCV scale:
+    # H 0-179, S and V 0-255). Red wraps through hue 0, so it has two ranges.
+    hsv:
+      red: [0, 100, 70, 5, 255, 255, 165, 100, 70, 179, 255, 255]
+      blue: [95, 120, 50, 130, 255, 255]
+      green: [40, 70, 50, 85, 255, 255]
+
+    open_kernel: 3            # px, opening removes specks
+    close_kernel: 5           # px, closing fills small holes
+    min_contour_area: 300     # px, smaller contours are noise
+
+    # Shape checks (training cones are short and wide, so the aspect range starts low)
+    min_aspect: 0.4           # height / width
+    max_aspect: 2.5
+    min_taper: 0.2            # 1 - top width / bottom width
+    min_symmetry: 0.6         # 0-1
+    min_solidity: 0.75        # contour area / convex hull area
+    max_vertices: 10          # corners of the approxPolyDP outline
+    approx_epsilon: 0.03      # approxPolyDP tolerance, fraction of the perimeter
+
+    # Color check: fraction of the strongly colored pixels around a cone that are its color
+    min_color_fraction: 0.6
+    color_context: 0.25       # how far beyond its box to look, fraction of its size
+
+    # Confidence: weighted mean of the scores (a heuristic, not a probability)
+    weights:
+      color: 0.25
+      aspect: 0.15
+      taper: 0.3
+      symmetry: 0.2
+      geometry: 0.1
+    min_confidence: 0.7
+
+cone_navigator:
+  ros__parameters:
+    camera_info_topic: oakd/rgb/preview/camera_info   # same camera and size as image_topic
+    scan_topic: scan
+    odom_topic: odom
+    cmd_vel_topic: cmd_vel
+    cmd_vel_stamped: true     # TwistStamped on Jazzy; check with ros2 topic info -v /cmd_vel
+
+    # Calibration (see the README): the sensors' mounting comes from TF
+    use_tf: true
+    camera_yaw_offset: 0.0    # rad, + = left, added to every camera bearing
+
+    # Exploration and the cone registry
+    scan_speed: 0.25          # rad/s
+    association_distance: 0.25  # m, same color and this close = the same cone
+    min_observations: 3
+
+    # Navigation
+    max_linear_velocity: 0.15   # m/s
+    max_angular_velocity: 0.3   # rad/s
+    kp_angular: 1.0             # 1/s, ALIGN: angular velocity = Kp * bearing error
+    kd_linear: 0.5              # 1/s, APPROACH: linear velocity = Kd * distance error
+    angular_tolerance: 0.05     # rad
+    stop_gap: 0.0254            # m, one inch
+    cone_base_offset: 0.05      # m, measure it: see "Stand-off calibration" in the README
+    obstacle_clearance: 0.2     # m

@@ -4,7 +4,10 @@ ROS 2 (Jazzy) colcon workspace for CS 5335 Robotic Science and Systems. `day2pkg
 drives a TurtleBot 4 through `cmd_vel`; `day3pkg` drives it with the Create 3's
 built-in actions and reads `/odom`; `day6pkg` builds an occupancy grid from the LiDAR;
 `day7pkg` finds landmarks in two such grids and plans paths on them with A*; `day9pkg`
-finds colored traffic cones with the camera and drives to them.
+finds colored traffic cones with the camera and drives to them; `cs5335_cone_finder`
+does the same with YOLO and visits each cone in turn, coming back to the start between;
+`cs5335_cone_navigation` finds cones by color and shape with classical vision, keeps a
+registry with unique IDs, and drives to the cone you pick.
 
 ## Packages
 
@@ -16,6 +19,8 @@ finds colored traffic cones with the camera and drives to them.
 | [`day6pkg`](src/day6pkg/README.md) | 6, 7    | Grid Node: occupancy grid from the LiDAR, saved as image and data   |
 | [`day7pkg`](src/day7pkg/README.md) | 7       | RANSAC corner landmarks, aligning two grids, A* path planning       |
 | [`day9pkg`](src/day9pkg/README.md) | 9       | Cone Node: find colored cones by camera, drive to one with LiDAR    |
+| [`cs5335_cone_finder`](src/cs5335_cone_finder/README.md) | 9 | Cone Detector (YOLO) + Cone Mission: record 3 cones, visit each and return |
+| [`cs5335_cone_navigation`](src/cs5335_cone_navigation/README.md) | 9 | Cone Detector (color + shape) + Cone Navigator: registry with IDs, drive to a chosen cone |
 
 See each package's README for details.
 
@@ -35,7 +40,9 @@ export ROS_DOMAIN_ID=8
 
 Some packages need system packages first: `day3pkg` needs the Create 3's messages
 (`irobot_create_msgs`), `day6pkg` needs NumPy and OpenCV, and `day9pkg` also needs
-`cv_bridge`. To install everything the
+`cv_bridge`. `cs5335_cone_finder` also needs `vision_msgs` and the pip package
+`ultralytics` (see [its README](src/cs5335_cone_finder/README.md#install) for installing
+it). To install everything the
 packages declare, run once from this directory (`robotics_ws`):
 
 ```bash
@@ -61,6 +68,8 @@ ros2 launch day6pkg day6_launch.py   # Project 6 with day3pkg's Driving + Execut
 ros2 run day7pkg landmarks run_a/grid.npz run_b/grid.npz   # Project 7, Task 2
 ros2 run day7pkg plan run_a/grid.npz --goal 2.2 0.7         # Project 7, Task 3
 ros2 run day9pkg cones --ros-args --params-file src/day9pkg/config/cones.yaml   # Project 9
+ros2 launch cs5335_cone_finder cone_finder_launch.py params_file:=src/cs5335_cone_finder/config/cone_finder.yaml   # Project 9 with YOLO
+ros2 launch cs5335_cone_navigation cone_navigation_launch.py params_file:=src/cs5335_cone_navigation/config/cone_navigation.yaml   # Project 9, classical vision
 ```
 
 For Project 5 (odometry), see the
