@@ -22,7 +22,7 @@ built on ROS 2 Jazzy and a TurtleBot 4.
 | 6       | Occupancy grid from LiDAR     | [`day6pkg`](robotics_ws/src/day6pkg/README.md)                     |
 | 7       | Landmarks and A* path planning | [`day7pkg`](robotics_ws/src/day7pkg/README.md)                    |
 | 8       | Nav2: map the room, Create Path | [`day8pkg`](robotics_ws/src/day8pkg/README.md)                   |
-| 9       | Computer vision: traffic cones | [`day9pkg`](robotics_ws/src/day9pkg/README.md), [`cs5335_cone_finder`](robotics_ws/src/cs5335_cone_finder/README.md) (YOLO), [`cs5335_cone_navigation`](robotics_ws/src/cs5335_cone_navigation/README.md) (color + shape) |
+| 9       | Computer vision: traffic cones | [`day9pkg`](robotics_ws/src/day9pkg/README.md)                     |
 
 ## Quick start
 
