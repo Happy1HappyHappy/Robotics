@@ -70,7 +70,7 @@ ros2 run day6pkg mapper              # Project 6 (Grid Node only)
 ros2 launch day6pkg day6_launch.py   # Project 6 with day3pkg's Driving + Executive
 ros2 run day7pkg landmarks run_a/grid.npz run_b/grid.npz   # Project 7, Task 2
 ros2 run day7pkg plan run_a/grid.npz --goal 2.2 0.7         # Project 7, Task 3
-ros2 run day8pkg create_path         # Project 8, after localization and Nav2 (see its README)
+ros2 run day8pkg create_path --ros-args --params-file src/day8pkg/config/lab_dock.yaml   # Project 8, after localization and Nav2
 ros2 run day9pkg cones --ros-args --params-file src/day9pkg/config/cones.yaml   # Project 9
 ros2 launch cs5335_cone_finder cone_finder_launch.py params_file:=src/cs5335_cone_finder/config/cone_finder.yaml   # Project 9 with YOLO
 ros2 launch cs5335_cone_navigation cone_navigation_launch.py params_file:=src/cs5335_cone_navigation/config/cone_navigation.yaml   # Project 9, classical vision

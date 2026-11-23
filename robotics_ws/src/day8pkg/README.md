@@ -62,6 +62,7 @@ costmaps cannot place the LiDAR scans on the map.
 | ---- | ---------- |
 | `day8pkg/create_path.py` | Node: Create Path, poses clicked with 2D Pose Estimate |
 | `day8pkg/point_path.py` | Node: path from points clicked with Publish Point |
+| `config/lab_dock.yaml` | The dock's pose on the lab map, for `create_path` |
 | `scripts/sim.bash` | Simulator with Nav2, localization and RViz in the warehouse world |
 | `scripts/sim_depot.bash`, `scripts/sim_maze.bash` | The same in the depot and maze worlds, with their maps |
 | `scripts/query_dock.bash` | Prints whether the robot is docked |
@@ -173,30 +174,31 @@ Measure it once, with step 2 running and the robot on the dock:
    ```
 
 2. In RViz, set the robot's pose with **2D Pose Estimate**, and repeat until the LiDAR points
-   line up with the walls on the map.
-3. Dock again. AMCL follows the robot onto the dock.
-
-   ```bash
-   ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"
-   ```
-
-4. Read the robot's pose on the map, then stop it with Ctrl-C. `Translation` gives x and y in
-   m, and the last number of `Rotation: in RPY (degree)` is the yaw.
+   line up with the walls on the map. Turning slowly in place with teleop (`j`, `l`) helps AMCL
+   settle.
+3. Start printing the robot's pose on the map, and leave it running:
 
    ```bash
    ros2 run tf2_ros tf2_echo map base_link
    ```
 
-   If it keeps printing `Lookup would require extrapolation into the past`, the LiDAR is off on
-   the dock, so AMCL has stopped updating `map` → `odom`. Turn the LiDAR on (check the service
-   name with `ros2 service list | grep motor`), wait a few seconds and run `tf2_echo` again:
+4. In another terminal, dock. AMCL follows the robot onto the dock.
 
    ```bash
-   ros2 service call /start_motor std_srvs/srv/Empty "{}"
+   ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"
    ```
 
-The values hold as long as the dock stays put and you use the same map. If all three come out
-close to 0, mapping did start on the dock and `create_path` needs no parameters.
+   On the dock the LiDAR turns off and AMCL stops updating `map` → `odom`, so a little later
+   `tf2_echo` starts printing `Lookup would require extrapolation into the past`. The last pose
+   it printed before that is the dock's: `Translation` gives x and y in m, and the last number
+   of `Rotation: in RPY (degree)` is the yaw. Stop it with Ctrl-C. (Started only after docking,
+   `tf2_echo` never prints a pose, because it has no data from before the LiDAR turned off.)
+5. Write them into [`config/lab_dock.yaml`](config/lab_dock.yaml), each with a decimal point
+   (`90.0`, not `90`).
+
+From then on `create_path` reads the dock's pose from that file, so there is nothing to click
+or measure again as long as the dock stays put and you use the same map. If all three values
+come out close to 0, mapping did start on the dock and the file can stay at zero.
 
 Shifting the `origin` in `lab_map.yaml` by the dock's x and y would also move (0, 0) onto the
 dock, but it cannot turn the map, so the dock's heading would still be off.
@@ -209,11 +211,11 @@ costmap has no color.
 
 1. Leave the robot on its dock. Do **not** set a pose or undock by hand: `create_path` does
    both.
-2. Run it with the dock's pose from step 3, each value with a decimal point (`90.0`, not `90`),
-   or with no parameters if the dock is at (0, 0) facing +x:
+2. Run it from `robotics_ws` with the dock's pose from step 3. Editing the file needs no
+   rebuild, since this reads it from `src`.
 
    ```bash
-   ros2 run day8pkg create_path --ros-args -p dock_x:=1.25 -p dock_y:=-0.40 -p dock_yaw_deg:=90.0
+   ros2 run day8pkg create_path --ros-args --params-file src/day8pkg/config/lab_dock.yaml
    ```
 
 3. In RViz, choose **2D Pose Estimate** and click-drag at A with the arrow toward B, then at B
