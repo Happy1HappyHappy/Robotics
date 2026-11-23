@@ -142,8 +142,28 @@ Connect to the robot (see [`related_cmds.txt`](../../../related_cmds.txt)), then
    ros2 launch turtlebot4_viz view_navigation.launch.py
    ```
 
-2. Drive slowly around at least half the room, watching the map fill in RViz. Keep people out
-   of the area while mapping.
+2. Drive slowly around at least half the room with the keyboard, from a third terminal,
+   watching the map fill in RViz. Keep people out of the area while mapping.
+
+   ```bash
+   ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true
+   ```
+
+   This is [`Week1/teleop.bash`](../../../Week1/teleop.bash). On Jazzy the robot's `cmd_vel`
+   takes `TwistStamped`, hence `stamped:=true`. Keep the teleop terminal focused and use:
+
+   | Key | Motion |
+   | --- | ------ |
+   | `i` / `,` | Forward / backward |
+   | `j` / `l` | Turn left / right in place |
+   | `u` / `o` | Forward while turning left / right |
+   | `k` | Stop |
+   | `z` / `q` | Slower / faster (speed and turn × 0.9 / × 1.1) |
+
+   It starts at 0.5 m/s and 1.0 rad/s (the robot caps speed at 0.31 m/s). Before mapping,
+   press `z` about 9 times, to about 0.2 m/s and 0.4 rad/s; slow turns keep the map sharp.
+   Hold a key to keep moving. The robot stops shortly after you let go, but press `k` to stop
+   at once.
 3. Save the map. This writes `lab_map.pgm` (the image) and `lab_map.yaml` to the current
    directory:
 
