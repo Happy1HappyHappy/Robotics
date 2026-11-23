@@ -41,6 +41,13 @@ Clicking with 2D Pose Estimate also moves AMCL's estimate, so `create_path` need
 to reset the robot's pose to afterwards: the dock. That is why the dock's pose on the map is
 measured once and kept in `config/lab_dock.yaml`.
 
+Nav2 is not one program but a chain of nodes (planner, controller, velocity smoother, collision
+monitor, waypoint follower, ...). A lifecycle manager starts them one by one, and the robot can
+only move once **all** of them are active. It can finish starting only while AMCL publishes the
+robot's pose, which needs the LiDAR, so the robot must be **off the dock** then. Once active,
+Nav2 stays active, also after the robot docks again. So the demo starts Nav2 first, as a
+separate step, and only then runs `create_path`.
+
 ## Files
 
 | File | What it is |
@@ -52,21 +59,27 @@ measured once and kept in `config/lab_dock.yaml`.
 
 ## 0. Before you start
 
-**Every terminal** needs the same settings. Run these in each one (they are the
-[workspace Setup](../../README.md#setup)):
+**Every terminal** must have exactly the same settings, or nodes find each other slowly, answers
+get lost and Nav2 hangs while starting. This robot uses a discovery server on the robot
+(`10.245.131.96` is its IP; change it if the robot's IP changes). Run this in **every** terminal,
+and do **not** use `ROS_DOMAIN_ID=8` from the workspace Setup for this project:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export ROS_DOMAIN_ID=8
+export ROS_DOMAIN_ID=0
+export ROS_DISCOVERY_SERVER=";;;;;;;;10.245.131.96:11811;"
+export ROS_SUPER_CLIENT=True
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 ```
 
-If you also set `ROS_DISCOVERY_SERVER` for the robot, set it the same way in every terminal.
-Terminals with different settings find each other slowly or not at all. To compare them:
+To check a terminal (the output must be the same everywhere):
 
 ```bash
-printenv | grep -E "ROS_DOMAIN_ID|RMW_IMPLEMENTATION|ROS_DISCOVERY_SERVER|ROS_SUPER_CLIENT"
+printenv | grep -E "ROS_DOMAIN_ID|RMW_IMPLEMENTATION|ROS_DISCOVERY_SERVER|ROS_SUPER_CLIENT|FASTDDS"
 ```
+
+After changing settings, restart the ROS daemon once: `ros2 daemon stop; ros2 daemon start`.
 
 Get the latest code and build it, in the repository:
 
@@ -77,7 +90,18 @@ colcon build --packages-select day8pkg
 source install/setup.bash
 ```
 
-The robot must be on and reachable (`ros2 topic echo /ip` prints something).
+Then check the robot:
+
+- It is reachable: `ros2 topic echo /ip` prints something.
+- No node runs twice. This must print nothing but a warning line:
+
+  ```bash
+  ros2 node list | sort | uniq -d
+  ```
+
+  If it lists nodes, close extra RViz windows and leftover terminals, and if robot nodes such as
+  `/turtlebot4_node` are listed, reboot the robot (`ssh ubuntu@10.245.131.96`, then
+  `sudo reboot`, and wait 2 minutes).
 
 ## 1. One-time setup
 
@@ -145,9 +169,11 @@ measure it just outside the dock, then drive back on while recording.
    ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
    ```
 
-3. In RViz, click **2D Pose Estimate** and drag an arrow where the robot is, pointing the way it
-   faces. Repeat until the red LiDAR points lie on the black walls of the map, including their
-   tilt.
+3. In RViz, click **2D Pose Estimate** and drag an arrow where the robot is, pointing the way its
+   **camera side** faces. Repeat until the red LiDAR points lie on the black walls, including
+   their tilt. The room is nearly a rectangle, so an arrow pointing the wrong way (180°) can
+   also put the points on the walls: check that the box near the top wall and the openings line
+   up too.
 4. With teleop, turn slowly about a quarter turn with `j`, back with `l`, then `k`. The red
    points should stay on the walls.
 5. Start printing the robot's pose on the map, and **leave it running**:
@@ -179,11 +205,9 @@ measure it just outside the dock, then drive back on while recording.
    `create_path` reads this file from `src`, so changing it needs no rebuild.
 9. Stop localization, RViz and `tf2_echo` with Ctrl-C.
 
-## 2. Demo: Create Path (every time)
+## 2. Before each demo: start Nav2
 
-Clear the floor, keep people away from the path and have someone ready to pick the robot up.
-Plan the path first: for example A → B is 1 m straight, B → C is 1 m after a 90° turn. In RViz
-one grid cell is 1 m. Pick points in open space, away from table legs.
+Do this before the instructor watches, so that a slow start does not hold up the demo.
 
 1. Put the robot on the dock.
 2. **Terminal 1**, localization with your map:
@@ -192,48 +216,112 @@ one grid cell is 1 m. Pick points in open space, away from table legs.
    ros2 launch turtlebot4_navigation localization.launch.py map:=$HOME/lab_map.yaml
    ```
 
-3. **Terminal 2**, RViz. Wait until the map shows.
+3. **Terminal 2**, RViz (only one). Wait until the map shows.
 
    ```bash
    ros2 launch turtlebot4_viz view_navigation.launch.py
    ```
 
-4. **Terminal 3**, in `robotics_ws` (after `source install/setup.bash`):
+4. **Terminal 3**, undock:
+
+   ```bash
+   ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
+   ```
+
+5. In RViz, set the robot's pose with **2D Pose Estimate** until the red points lie on the walls
+   (as in [1B](#b-measure-the-docks-pose) step 3).
+6. **Terminal 4**, Nav2, saving its output to `~/nav2.log`:
+
+   ```bash
+   ros2 launch turtlebot4_navigation nav2.launch.py 2>&1 | tee ~/nav2.log
+   ```
+
+   Wait, up to about a minute, for `Managed nodes are active`. Do not run other commands on Nav2
+   while it starts. If it does not come, see
+   [Nav2 does not finish starting](#nav2-does-not-finish-starting).
+7. **Terminal 3**, dock again. Nav2 stays active.
+
+   ```bash
+   ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"
+   ```
+
+Keep Terminals 1, 2 and 4 running for the demo.
+
+## 3. Demo: Create Path
+
+Clear the floor, keep people away from the path and have someone ready to pick the robot up.
+Plan the path first: for example A → B is 1 m straight, B → C is 1 m after a 90° turn. In RViz
+one grid cell is 1 m. Pick points in open space, away from table legs.
+
+1. **Terminal 3**, in `robotics_ws` (after `source install/setup.bash`):
 
    ```bash
    ros2 run day8pkg create_path --ros-args --params-file src/day8pkg/config/lab_dock.yaml
    ```
 
-5. In RViz, click **2D Pose Estimate** and drag at A with the arrow toward B, then at B toward
+2. In RViz, click **2D Pose Estimate** and drag at A with the arrow toward B, then at B toward
    C, then at C. Each click prints `Pose n added: (x, y)`. The robot icon jumps to each click;
    that is expected.
-6. Press **Enter** in Terminal 3. It prints the points (show that A → B and B → C are about
-   1 m), resets the pose to the dock, undocks, and then prints
-   `Waiting for Nav2 (waypoint_follower) to be active...`.
-7. Look at RViz: the red LiDAR points must lie on the walls. If they do not, press Ctrl-C in
-   Terminal 3 and redo [1B](#b-measure-the-docks-pose).
-8. **Terminal 4**, Nav2. Start it only now, once the robot is off the dock: Nav2 needs AMCL's
-   pose to start, and gives up if it waits too long.
-
-   ```bash
-   ros2 launch turtlebot4_navigation nav2.launch.py
-   ```
-
-   Wait for `Managed nodes are active` in Terminal 4.
-9. Terminal 3 goes on by itself: `Following waypoints...`. The robot drives A → B → C and
-   docks.
+3. Press **Enter** in Terminal 3. It prints the points (show that A → B and B → C are about
+   1 m), resets the pose to the dock, undocks, and, since Nav2 is already active, **starts
+   driving right away**: `Following waypoints...`. The robot drives A → B → C and docks.
 
 To stop the robot at any time, press Ctrl-C in Terminal 3, or pick it up.
 
 ## Troubleshooting
 
+### Nav2 does not finish starting
+
+`Managed nodes are active` never comes, or `create_path` keeps waiting at
+`Waiting for Nav2 (waypoint_follower) to be active...`.
+
+1. See which node it stopped at. Nav2 starts them in this order, and the first one that is not
+   `active [3]` is where it hangs:
+
+   ```bash
+   for n in controller_server smoother_server planner_server behavior_server velocity_smoother collision_monitor bt_navigator waypoint_follower docking_server; do echo -n "$n: "; timeout 10 ros2 lifecycle get /$n || echo "(no answer)"; done
+   ```
+
+2. Look for the reason in the log:
+
+   ```bash
+   grep -n -E "Managed nodes|Aborting|failed to send|died|ERROR|collision_monitor" ~/nav2.log
+   ```
+
+   - `failed to send response ... (timeout): client will not receive response`: an answer
+     between two nodes got lost, and the lifecycle manager waits for it forever. Usually the
+     settings differ between terminals, or a node runs twice (see [step 0](#0-before-you-start)).
+   - `process has died`, or one node (often `collision_monitor`) never answers: that node is
+     stuck or gone.
+3. Restart Nav2 cleanly: Ctrl-C in Terminal 4, then check that no Nav2 process is left (`kill`
+   any that is, with the number in the second column):
+
+   ```bash
+   ps aux | grep -E "controller_server|planner_server|collision_monitor|bt_navigator|waypoint_follower|lifecycle_manager" | grep -v grep
+   ```
+
+   With the robot off the dock and its pose set, start Nav2 again ([2](#2-before-each-demo-start-nav2)
+   step 6).
+4. If one or two nodes are still `inactive [2]` while the rest are active, activate the rest by
+   hand. **If `create_path` is waiting, the robot starts driving as soon as this succeeds.**
+
+   ```bash
+   for n in smoother_server planner_server behavior_server velocity_smoother collision_monitor bt_navigator waypoint_follower docking_server; do echo "== $n"; timeout 15 ros2 lifecycle set /$n activate; done
+   ```
+
+   Run it again if a node is still not active. Nodes that are already active just report a
+   failed transition.
+
+### Other problems
+
 | What you see | Why | What to do |
 | ------------ | --- | ---------- |
 | After the undock, the red points do not lie on the walls | `lab_dock.yaml` is wrong, or the dock moved | Redo [1B](#b-measure-the-docks-pose). `create_path` gives AMCL the dock pose as certain, so AMCL does not correct a wrong one |
-| Terminal 3 keeps waiting at `Waiting for Nav2 (waypoint_follower) to be active...` | Nav2 has not finished starting | Read Terminal 4. If it says `Aborting bringup`, or stops after `failed to send response ... (timeout)`, press Ctrl-C there, wait until it has exited, and start Nav2 again. Terminal 3 can keep waiting |
-| Nav2 takes long to find its own nodes (`Waiting for service ... get_state`) | Terminals with different settings | Compare them with the `printenv` line in [step 0](#0-before-you-start) |
+| The red points lie on the walls, but the robot icon faces the opposite way from the real robot (camera side) | The dock's yaw is 180° off | Add 180 to `dock_yaw_deg` (for example `-6.4` → `173.6`), or redo [1B](#b-measure-the-docks-pose) |
+| `ros2 node list \| sort \| uniq -d` lists nodes | Two RViz, a leftover terminal, or the robot's software running twice | See [step 0](#0-before-you-start) |
+| Nav2 keeps printing `Message Filter dropping message ... earlier than all the data in the transform cache` | The robot's two computers (Raspberry Pi and Create 3) disagree on the time | A few lines while Nav2 starts are fine. If it never stops, power the robot fully off and on: take it off the dock, hold the power button about 10 s until the lights go out, put it back on the dock, wait 2-3 minutes |
 | `tf2_echo` only prints `extrapolation into the past`, never a pose | It was started after docking, when the LiDAR was already off | Start it before docking (1B step 5) |
-| Terminal 3 prints `... not available, skipping` for the costmaps | Nav2 is not running yet, which is expected in this order | Nothing |
+| A `ros2` command hangs with no output | Its answer got lost | Ctrl-C and run it again; put `timeout 10` in front of it |
 | `ros2 run day8pkg ...` is not found | Not built, or `install/setup.bash` not sourced | See [step 0](#0-before-you-start) |
 
 ## Extra credit: lab map
@@ -253,7 +341,8 @@ instructor `lab_map.pgm` (or the map in RViz), then drive through the room with 
 ## In the simulator (optional)
 
 The simulator needs Gazebo and a computer with a GPU; it does not run in a virtual machine (the
-robot never spawns there). From `robotics_ws`:
+robot never spawns there). It also uses no discovery server: unset `ROS_DISCOVERY_SERVER` and
+`ROS_SUPER_CLIENT` in its terminals. From `robotics_ws`:
 
 ```bash
 bash src/day8pkg/scripts/sim.bash
@@ -261,5 +350,5 @@ bash src/day8pkg/scripts/sim.bash
 
 This one command starts Gazebo, localization, Nav2 and RViz. In the simulator the dock is at the
 map origin, so run `ros2 run day8pkg create_path` with no parameters and follow
-[step 2](#2-demo-create-path-every-time) from 5 on (Nav2 is already running, so skip 8). Stop the simulator with Ctrl-C in its
-terminal, not by closing its windows.
+[step 3](#3-demo-create-path). Stop the simulator with Ctrl-C in its terminal, not by closing its
+windows.
