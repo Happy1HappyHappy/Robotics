@@ -279,7 +279,7 @@ To stop the robot at any time, press Ctrl-C in Terminal 3, or pick it up.
    `active [3]` is where it hangs:
 
    ```bash
-   for n in controller_server smoother_server planner_server behavior_server velocity_smoother collision_monitor bt_navigator waypoint_follower docking_server; do echo -n "$n: "; timeout 10 ros2 lifecycle get /$n || echo "(no answer)"; done
+   for n in controller_server smoother_server planner_server behavior_server velocity_smoother collision_monitor bt_navigator waypoint_follower docking_server; do echo -n "$n: "; timeout -k 3 10 ros2 lifecycle get /$n || echo "(no answer)"; done
    ```
 
 2. Look for the reason in the log:
@@ -302,15 +302,17 @@ To stop the robot at any time, press Ctrl-C in Terminal 3, or pick it up.
 
    With the robot off the dock and its pose set, start Nav2 again ([2](#2-before-each-demo-start-nav2)
    step 6).
-4. If one or two nodes are still `inactive [2]` while the rest are active, activate the rest by
-   hand. **If `create_path` is waiting, the robot starts driving as soon as this succeeds.**
+4. If some nodes are still not active, activate them by hand. Each new `ros2` command is a
+   newcomer that the node must recognize within a fraction of a second before it answers; over
+   the robot's discovery server this often takes longer, so the answer gets lost and the command
+   hangs. This loop retries each node until it is active (`timeout -k` kills a hung try).
+   **If `create_path` is waiting, the robot starts driving as soon as this succeeds.**
 
    ```bash
-   for n in smoother_server planner_server behavior_server velocity_smoother collision_monitor bt_navigator waypoint_follower docking_server; do echo "== $n"; timeout 15 ros2 lifecycle set /$n activate; done
+   for n in smoother_server planner_server behavior_server velocity_smoother collision_monitor bt_navigator waypoint_follower docking_server; do until timeout -k 3 10 ros2 lifecycle get /$n 2>/dev/null | grep -q "active \[3\]"; do echo "== activating $n"; timeout -k 3 15 ros2 lifecycle set /$n activate; done; echo "$n: active"; done
    ```
 
-   Run it again if a node is still not active. Nodes that are already active just report a
-   failed transition.
+   Ctrl-C stops it, for example if one node never comes up; then restart Nav2 (step 3).
 
 ### Other problems
 
@@ -321,7 +323,7 @@ To stop the robot at any time, press Ctrl-C in Terminal 3, or pick it up.
 | `ros2 node list \| sort \| uniq -d` lists nodes | Two RViz, a leftover terminal, or the robot's software running twice | See [step 0](#0-before-you-start) |
 | Nav2 keeps printing `Message Filter dropping message ... earlier than all the data in the transform cache` | The robot's two computers (Raspberry Pi and Create 3) disagree on the time | A few lines while Nav2 starts are fine. If it never stops, power the robot fully off and on: take it off the dock, hold the power button about 10 s until the lights go out, put it back on the dock, wait 2-3 minutes |
 | `tf2_echo` only prints `extrapolation into the past`, never a pose | It was started after docking, when the LiDAR was already off | Start it before docking (1B step 5) |
-| A `ros2` command hangs with no output | Its answer got lost | Ctrl-C and run it again; put `timeout 10` in front of it |
+| A `ros2` command hangs with no output | Its answer got lost | Ctrl-C and run it again; put `timeout -k 3 10` in front of it |
 | `ros2 run day8pkg ...` is not found | Not built, or `install/setup.bash` not sourced | See [step 0](#0-before-you-start) |
 
 ## Extra credit: lab map
