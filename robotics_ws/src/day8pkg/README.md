@@ -73,7 +73,7 @@ one grid cell is 1 m. Pick points in open space, away from table legs.
 1. **Robot C**, start `create_path` with the dock's pose:
 
    ```bash
-   python3 ~/day8pkg/day8pkg/create_path.py --ros-args --params-file ~/day8pkg/config/lab_dock.yaml
+   python3 ~/create_path.py --ros-args --params-file ~/lab_dock.yaml
    ```
 
 2. In RViz, click **2D Pose Estimate** and drag at A with the arrow toward B, then at B toward
@@ -157,17 +157,19 @@ Nav2 running on the PC. If robot nodes such as `/turtlebot4_node` are listed, re
    scp ~/lab_map.pgm ~/lab_map.yaml ubuntu@10.245.131.96:~/
    ```
 
-### B. Copy day8pkg to the robot
+### B. Copy create_path to the robot
 
-`create_path` runs on the robot straight from its source with `python3`, so nothing needs to be
-built there. In a PC terminal, get the latest code and copy the package over:
+The demo needs only two files on the robot: `create_path.py` and the dock's pose,
+`lab_dock.yaml`. `create_path.py` runs straight from the file with `python3`, so nothing needs to
+be built there. In a PC terminal, get the latest code and copy both to the robot's home
+directory:
 
 ```bash
 cd ~/Robotics && git pull
-scp -r ~/Robotics/robotics_ws/src/day8pkg ubuntu@10.245.131.96:~/
+scp robotics_ws/src/day8pkg/day8pkg/create_path.py robotics_ws/src/day8pkg/config/lab_dock.yaml ubuntu@10.245.131.96:~/
 ```
 
-This puts it at `~/day8pkg` on the robot. Copy it again after every code change.
+Copy `create_path.py` again after every code change.
 
 ### C. Measure the dock's pose
 
@@ -198,7 +200,7 @@ just outside the dock, then drive back on while recording.
 8. **Robot C**, write them into the robot's copy, each with a decimal point (`-6.4`, not `-6`):
 
    ```bash
-   nano ~/day8pkg/config/lab_dock.yaml
+   nano ~/lab_dock.yaml
    ```
 
    ```yaml
@@ -210,7 +212,7 @@ just outside the dock, then drive back on while recording.
    ```
 
    Ctrl-O saves, Ctrl-X quits. Put the same numbers into `robotics_ws/src/day8pkg/config/lab_dock.yaml`
-   on the PC too, so that copying the package again (B) does not undo them.
+   on the PC too, so that copying the files again (B) does not undo them.
 9. Stop everything with Ctrl-C.
 
 ## Troubleshooting
@@ -356,8 +358,11 @@ instructor `lab_map.pgm` (or the map in RViz), then drive through the room with 
   **2D Pose Estimate**, then click a goal with **Nav2 Goal**.
 - **`point_path`**: the same as `create_path`, but you click the points with **Publish Point**,
   which does not move AMCL's pose, so it needs no `lab_dock.yaml`. Undock, set the pose with
-  **2D Pose Estimate**, run `python3 ~/day8pkg/day8pkg/point_path.py` in Robot C, click the
-  points and press Enter. Each click prints its distance from the previous point.
+  **2D Pose Estimate**, and run it in Robot C, after copying it like `create_path.py` (B):
+  `scp robotics_ws/src/day8pkg/day8pkg/point_path.py ubuntu@10.245.131.96:~/` on the PC (in
+  `~/Robotics`), then
+  `python3 ~/point_path.py` on the robot. Click the points and press Enter. Each click prints its
+  distance from the previous point.
 - On the PC, after `colcon build --packages-select day8pkg` and `source install/setup.bash` in
   `robotics_ws`, both also run as `ros2 run day8pkg create_path` and `ros2 run day8pkg point_path`,
   but their questions to Nav2 then cross Wi-Fi.
