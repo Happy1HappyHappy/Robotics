@@ -32,7 +32,7 @@ steers and brakes.
 create_path:
     collect the poses clicked in RViz until Enter
     dock if needed; reset the pose to the dock (by default (0, 0), facing +x); clear the costmaps
-    undock; wait until AMCL reports a pose
+    undock; wait until AMCL reports a pose and Nav2 is active
     follow the poses as waypoints with Nav2
     dock
 ```
@@ -190,7 +190,8 @@ Measure it once, with step 2 running and the robot on the dock:
 
    On the dock the LiDAR turns off and AMCL stops updating `map` → `odom`, so a little later
    `tf2_echo` starts printing `Lookup would require extrapolation into the past`. The last pose
-   it printed before that is the dock's: `Translation` gives x and y in m, and the last number
+   it printed before that is the dock's (the pose on the dock, not where the robot stops after
+   undocking): `Translation` gives x and y in m, and the last number
    of `Rotation: in RPY (degree)` is the yaw. Stop it with Ctrl-C. (Started only after docking,
    `tf2_echo` never prints a pose, because it has no data from before the LiDAR turned off.)
 5. Write them into [`config/lab_dock.yaml`](config/lab_dock.yaml), each with a decimal point
@@ -279,6 +280,10 @@ processes get in the way of the next start.
 - **Nav2 never becomes active while docked**: the power saver turns the LiDAR off on the dock,
   so AMCL cannot answer and `waitUntilNav2Active()` keeps re-publishing the pose.
   `create_path` undocks first and then waits up to 30 s for AMCL.
+- **`Following N waypoints request was rejected!`**: Nav2's `waypoint_follower` was not active
+  yet (its terminal says `Action server is inactive. Rejecting the goal.`). Nav2 can only
+  finish starting once AMCL gives `map` → `odom`, after the undock, so `create_path` waits for
+  `waypoint_follower` to be active before sending the path.
 - **Clearing the costmaps hangs**: `clearAllCostmaps()` waits forever for the services, so
   `create_path` gives up after 3 s per costmap and goes on.
 - **No topics**: every terminal needs the same `ROS_DOMAIN_ID`. For the simulator,

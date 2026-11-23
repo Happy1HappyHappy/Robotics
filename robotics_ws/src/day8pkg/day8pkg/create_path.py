@@ -5,7 +5,7 @@ Same flow as the tutorial's create_path (turtlebot4_python_tutorials), but colle
 TurtleBot4Navigator.createPath()
 1. Click the path's poses in RViz with "2D Pose Estimate", then press Enter here
 2. Dock if needed, reset the pose to the dock and clear the costmaps
-3. Undock, wait for AMCL, follow the clicked poses as waypoints with Nav2, and dock again
+3. Undock, wait for AMCL and Nav2, follow the clicked poses as waypoints, and dock again
 The clicks also move AMCL's estimate, which is why step 2 resets it
 The dock's pose on the map comes from the dock_x, dock_y and dock_yaw_deg parameters; the
 defaults (0, 0, facing +x) fit a map that was started on the dock, like the simulator's
@@ -107,6 +107,11 @@ def main():
             rclpy.shutdown()
             return
     navigator.info('AMCL pose received.')
+
+    # Nav2 can only finish starting once AMCL gives map -> odom (after the undock), and
+    # rejects goals until then. The pose is already received, so this does not re-publish it.
+    navigator.info('Waiting for Nav2 (waypoint_follower) to be active...')
+    navigator.waitUntilNav2Active(navigator='waypoint_follower')
 
     navigator.info('Following waypoints...')
     navigator.startFollowWaypoints(poses)
