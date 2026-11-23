@@ -22,6 +22,28 @@ shows RViz, where you click. See [Why on the robot](#why-on-the-robot) for the r
 
 ## Demo
 
+### Files on the robot
+
+Localization and `create_path` run on the robot, so the robot needs these four files in its home
+directory: the map (`lab_map.pgm`, `lab_map.yaml`), `create_path.py` and the dock's pose
+(`lab_dock.yaml`). Check that they are there (PC terminal):
+
+```bash
+ssh ubuntu@10.245.131.96 ls ~
+```
+
+If one is missing, or after a new map, a code change or a new dock pose, copy them from the PC
+(it asks for the robot's password). Change `~/lab_map.pgm` and `~/lab_map.yaml` if the map is
+somewhere else on the PC:
+
+```bash
+cd ~/Robotics && git pull
+scp ~/lab_map.pgm ~/lab_map.yaml robotics_ws/src/day8pkg/day8pkg/create_path.py robotics_ws/src/day8pkg/config/lab_dock.yaml ubuntu@10.245.131.96:~/
+```
+
+`lab_map.pgm` and `lab_map.yaml` must stay in the same folder: the `.yaml` names the image as
+`image: lab_map.pgm` and looks for it next to itself.
+
 ### Before the instructor watches: start Nav2
 
 Nav2 can only finish starting while the robot is off the dock, so start it first, as its own
@@ -151,25 +173,13 @@ Nav2 running on the PC. If robot nodes such as `/turtlebot4_node` are listed, re
    ```
 
 5. Stop SLAM with Ctrl-C and drive the robot back onto the dock.
-6. Copy the map to the robot (PC terminal; it asks for the robot's password):
-
-   ```bash
-   scp ~/lab_map.pgm ~/lab_map.yaml ubuntu@10.245.131.96:~/
-   ```
+6. Copy the map to the robot, as in [Files on the robot](#files-on-the-robot).
 
 ### B. Copy create_path to the robot
 
-The demo needs only two files on the robot: `create_path.py` and the dock's pose,
-`lab_dock.yaml`. `create_path.py` runs straight from the file with `python3`, so nothing needs to
-be built there. In a PC terminal, get the latest code and copy both to the robot's home
-directory:
-
-```bash
-cd ~/Robotics && git pull
-scp robotics_ws/src/day8pkg/day8pkg/create_path.py robotics_ws/src/day8pkg/config/lab_dock.yaml ubuntu@10.245.131.96:~/
-```
-
-Copy `create_path.py` again after every code change.
+`create_path.py` runs on the robot straight from the file with `python3`, so nothing needs to be
+built there. Copy it together with `lab_dock.yaml`, as in [Files on the robot](#files-on-the-robot),
+and again after every code change.
 
 ### C. Measure the dock's pose
 
@@ -212,7 +222,8 @@ just outside the dock, then drive back on while recording.
    ```
 
    Ctrl-O saves, Ctrl-X quits. Put the same numbers into `robotics_ws/src/day8pkg/config/lab_dock.yaml`
-   on the PC too, so that copying the files again (B) does not undo them.
+   on the PC too, so that copying the files again ([Files on the robot](#files-on-the-robot))
+   does not undo them.
 9. Stop everything with Ctrl-C.
 
 ## Troubleshooting
@@ -358,7 +369,7 @@ instructor `lab_map.pgm` (or the map in RViz), then drive through the room with 
   **2D Pose Estimate**, then click a goal with **Nav2 Goal**.
 - **`point_path`**: the same as `create_path`, but you click the points with **Publish Point**,
   which does not move AMCL's pose, so it needs no `lab_dock.yaml`. Undock, set the pose with
-  **2D Pose Estimate**, and run it in Robot C, after copying it like `create_path.py` (B):
+  **2D Pose Estimate**, and run it in Robot C, after copying it like `create_path.py`:
   `scp robotics_ws/src/day8pkg/day8pkg/point_path.py ubuntu@10.245.131.96:~/` on the PC (in
   `~/Robotics`), then
   `python3 ~/point_path.py` on the robot. Click the points and press Enter. Each click prints its
