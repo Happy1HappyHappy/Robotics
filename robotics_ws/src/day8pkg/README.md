@@ -28,7 +28,7 @@ steers and brakes.
 ```text
 create_path:
     collect the poses clicked in RViz until Enter
-    dock if needed; reset the pose to the dock at (0, 0); clear the costmaps
+    dock if needed; reset the pose to the dock (by default (0, 0), facing +x); clear the costmaps
     undock; wait until AMCL reports a pose
     follow the poses as waypoints with Nav2
     dock
@@ -104,7 +104,8 @@ RViz's grid cells are 1 m (Grid display, Cell Size). Pick the points in open spa
 costmap has no color.
 
 1. Start the simulator fresh with `sim.bash` and leave the robot on its dock. Do **not** set a
-   pose or undock by hand: `create_path` assumes the robot starts docked at the map origin.
+   pose or undock by hand: `create_path` assumes the robot starts on the dock, which in the
+   simulator is at the map origin.
 2. In a second terminal:
 
    ```bash
@@ -183,6 +184,51 @@ Connect to the robot (see [`related_cmds.txt`](../../../related_cmds.txt)), then
    `point_path`).
 
 On the real robot, clear the floor, keep it slow and have someone ready to pick it up.
+
+### create_path on your map
+
+`create_path` resets the robot's pose to the dock, which it takes to be at (0, 0) facing +x
+unless told otherwise. On a SLAM map, (0, 0) is where the robot was when mapping started
+(more exactly, where its odometry started), so it is the dock only if mapping started on the
+dock. The `origin` in `lab_map.yaml` is something else: where the image's lower-left corner
+is on the map.
+
+Measure the dock's pose once, with localization, Nav2 and RViz running and the robot on the
+dock:
+
+1. Undock, so that the LiDAR turns on (the power saver turns it off on the dock). If the action
+   is not found, check the names with `ros2 action list -t`.
+
+   ```bash
+   ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
+   ```
+
+2. In RViz, set the robot's pose with **2D Pose Estimate**, and repeat until the LiDAR points
+   line up with the walls on the map.
+3. Dock again. AMCL follows the robot onto the dock.
+
+   ```bash
+   ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"
+   ```
+
+4. Read the robot's pose on the map, then stop it with Ctrl-C. `Translation` gives x and y in
+   m, and the last number of `Rotation: in RPY (degree)` is the yaw.
+
+   ```bash
+   ros2 run tf2_ros tf2_echo map base_link
+   ```
+
+5. Pass them to `create_path`, each with a decimal point (`90.0`, not `90`), for example:
+
+   ```bash
+   ros2 run day8pkg create_path --ros-args -p dock_x:=1.25 -p dock_y:=-0.40 -p dock_yaw_deg:=90.0
+   ```
+
+The values hold as long as the dock stays put and you use the same map. If all three come out
+close to 0, mapping did start on the dock and the defaults are fine.
+
+Shifting the `origin` in `lab_map.yaml` by the dock's x and y would also move (0, 0) onto the
+dock, but it cannot turn the map, so the dock's heading would still be off.
 
 ## Troubleshooting
 

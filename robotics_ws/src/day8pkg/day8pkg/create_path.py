@@ -4,9 +4,11 @@ Same flow as the tutorial's create_path (turtlebot4_python_tutorials), but colle
 "2D Pose Estimate" clicks with its own subscription instead of
 TurtleBot4Navigator.createPath()
 1. Click the path's poses in RViz with "2D Pose Estimate", then press Enter here
-2. Dock if needed, reset the pose to the dock at (0, 0) and clear the costmaps
+2. Dock if needed, reset the pose to the dock and clear the costmaps
 3. Undock, wait for AMCL, follow the clicked poses as waypoints with Nav2, and dock again
 The clicks also move AMCL's estimate, which is why step 2 resets it
+The dock's pose on the map comes from the dock_x, dock_y and dock_yaw_deg parameters; the
+defaults (0, 0, facing +x) fit a map that was started on the dock, like the simulator's
 """
 
 import threading
@@ -15,8 +17,7 @@ import time
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav2_msgs.srv import ClearEntireCostmap
 import rclpy
-from turtlebot4_navigation.turtlebot4_navigator import (
-    TurtleBot4Directions, TurtleBot4Navigator)
+from turtlebot4_navigation.turtlebot4_navigator import TurtleBot4Navigator
 
 
 def clear_costmaps_with_timeout(navigator, timeout_sec=3.0):
@@ -40,6 +41,10 @@ def clear_costmaps_with_timeout(navigator, timeout_sec=3.0):
 def main():
     rclpy.init()
     navigator = TurtleBot4Navigator()
+    # The dock's pose on the map; write values with a decimal point (1.0, not 1)
+    dock_x = navigator.declare_parameter('dock_x', 0.0).value              # m
+    dock_y = navigator.declare_parameter('dock_y', 0.0).value              # m
+    dock_yaw_deg = navigator.declare_parameter('dock_yaw_deg', 0.0).value  # deg, 0 = facing +x
     poses = []
 
     def on_pose(msg):
@@ -80,15 +85,16 @@ def main():
         navigator.info('Docking before initialising pose')
         navigator.dock()
 
-    # Reset localization (the clicks above also moved AMCL's estimate)
-    navigator.info('Clearing costmaps and setting initial pose...')
-    initial_pose = navigator.getPoseStamped([0.0, 0.0], TurtleBot4Directions.NORTH)
+    # Reset localization to the dock (the clicks above also moved AMCL's estimate)
+    navigator.info(f'Clearing costmaps and setting initial pose to the dock at '
+                   f'({dock_x:.2f}, {dock_y:.2f}), {dock_yaw_deg:.0f} deg...')
+    initial_pose = navigator.getPoseStamped([dock_x, dock_y], dock_yaw_deg)
     clear_costmaps_with_timeout(navigator)
     navigator.setInitialPose(initial_pose)   # also resets initial_pose_received
 
     # Power saver turns the lidar off while docked, so AMCL cannot answer yet.
-    # Undock first; AMCL keeps the (0, 0) pose and follows the undock via odom.
-    # (waitUntilNav2Active() would re-publish (0, 0) forever while docked.)
+    # Undock first; AMCL keeps the dock pose and follows the undock via odom.
+    # (waitUntilNav2Active() would re-publish the dock pose forever while docked.)
     navigator.info('Undocking (lidar starts after undock)...')
     navigator.undock()
 
