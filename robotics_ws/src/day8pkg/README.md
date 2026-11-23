@@ -3,11 +3,82 @@
 Python package for CS 5335 Project 8 (TurtleBot 4 and Nav2 tutorials). The demo is the
 TurtleBot 4 Navigator's
 [Create Path](https://turtlebot.github.io/turtlebot4-user-manual/tutorials/turtlebot4_navigator.html#create-path):
-you click a few points in RViz, and the real robot drives through them with Nav2 on a map of
-the room. It needs no simulator (Gazebo). The assignment asks for a path with at least two
-segments of about 1 m with an angle between them, for example an L.
+you click a few points in RViz, and the robot drives through them with Nav2. The assignment
+asks for a path with at least two segments of about 1 m with an angle between them, for example
+an L.
 
-Everything runs on the PC (the VM): localization, Nav2, RViz and `create_path`. Use four
+- **[Demo in the simulator](#demo-in-the-simulator)** (the required demo): Gazebo, on a computer
+  with a GPU. Not in a virtual machine.
+- **[Extra credit: the real robot](#extra-credit-the-real-robot)**: your own lab map and the real
+  TurtleBot 4.
+
+Ask the instructor if unsure which one the demo needs.
+
+## Demo in the simulator
+
+Gazebo plays the robot and the room (the course's warehouse world, with its map). One script
+starts Gazebo, localization, Nav2 and RViz; `create_path` then runs in a second terminal. The
+simulated dock is at the map origin, so `create_path` needs no `lab_dock.yaml` here.
+
+### Setup (once, on the GPU computer)
+
+In **every** terminal (the simulator uses no discovery server; pick one `ROS_DOMAIN_ID` that no
+one else near you uses, and use the same one in every terminal):
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_DOMAIN_ID=8
+unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
+```
+
+Get the code and build it (`git clone` the repository first if this computer does not have it):
+
+```bash
+cd ~/Robotics && git pull
+cd robotics_ws
+colcon build --packages-select day8pkg
+source install/setup.bash
+```
+
+### Run it
+
+1. **Terminal 1**, in `robotics_ws`, start the simulator:
+
+   ```bash
+   bash src/day8pkg/scripts/sim.bash
+   ```
+
+   Wait until Gazebo and RViz are up and the map shows (press Play in Gazebo if it is paused).
+   The robot starts on its dock.
+2. In RViz, click **2D Pose Estimate** and drag an arrow on the robot, pointing the way it
+   faces, then wait for the costmaps to show up. Nav2 needs this first pose to finish starting.
+3. **Terminal 2**, in `robotics_ws` (after `source install/setup.bash`):
+
+   ```bash
+   ros2 run day8pkg create_path
+   ```
+
+4. Plan an L in open space near the robot (one RViz grid cell is 1 m). In RViz, click
+   **2D Pose Estimate** and drag at A with the arrow toward B, then at B toward C, then at C.
+   Each click prints `Pose n added: (x, y)` in Terminal 2; the robot icon jumps to each click,
+   which is expected.
+5. Press **Enter** in Terminal 2. It prints the points (show that A → B and B → C are about
+   1 m), resets the pose to the dock, undocks, waits for Nav2, drives A → B → C and docks.
+
+If Terminal 2 keeps printing `... is inactive, waiting...`, run
+`bash src/day8pkg/scripts/activate_nav.bash` in a third terminal. Stop the simulator with Ctrl-C
+in Terminal 1, not by closing its windows, or leftover processes get in the way of the next
+start.
+
+## Extra credit: the real robot
+
+Show the instructor your map of at least half the lab (`lab_map.pgm`, made in
+[A](#a-map-the-room)), then drive the real robot through the mapped room with Nav2. The
+assignment does not ask for `create_path` here, so this uses `point_path` (or RViz's Nav2 Goal):
+you set the robot's pose once by hand, so it needs no dock pose (`lab_dock.yaml`).
+
+Everything runs on the PC (the VM): localization, Nav2, RViz and `point_path`. Use four
 terminals, each with the [PC terminal settings](#pc-terminal-settings):
 
 | Terminal | Runs |
@@ -15,16 +86,14 @@ terminals, each with the [PC terminal settings](#pc-terminal-settings):
 | T1 | Localization |
 | T2 | RViz |
 | T3 | Nav2 |
-| T4 | Undock, dock, `activate_nav.bash`, `create_path` (in `robotics_ws`, after `source install/setup.bash`) |
+| T4 | Undock, dock, `activate_nav.bash`, `point_path` (in `robotics_ws`, after `source install/setup.bash`) |
 
-The first time, do the [one-time setup](#one-time-setup) first.
+The first time, do the [PC terminal settings](#pc-terminal-settings) and [A. Map the room](#a-map-the-room)
+first.
 
-## Demo
+### Real robot demo
 
-### Before the instructor watches: start localization and Nav2
-
-Nav2 can only finish starting while the robot is off the dock, so start it first, as its own
-step. Once it is active, it stays active when the robot docks again.
+Clear the floor, keep people away from the path and have someone ready to pick the robot up.
 
 1. Put the robot on the dock.
 2. **T1**, localization with the map:
@@ -33,20 +102,21 @@ step. Once it is active, it stays active when the robot docks again.
    ros2 launch turtlebot4_navigation localization.launch.py map:=$HOME/lab_map.yaml
    ```
 
-3. **T2**, RViz (only one). Wait until the map shows.
+3. **T2**, RViz (only one). Wait until the map shows, and show it to the instructor.
 
    ```bash
    ros2 launch turtlebot4_viz view_navigation.launch.py
    ```
 
-4. **T4**, undock:
+4. **T4**, undock (Nav2 can only start once the LiDAR is on, which is off the dock):
 
    ```bash
    ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
    ```
 
 5. In RViz, click **2D Pose Estimate** and drag an arrow where the robot is, pointing the way its
-   camera side faces, until the red LiDAR points lie on the black walls.
+   camera side faces, until the red LiDAR points lie on the black walls (check the box near the
+   top wall and the openings too, not only the walls: the room is nearly a rectangle).
 6. **T3**, Nav2, saving its output to `~/nav2.log`:
 
    ```bash
@@ -64,41 +134,42 @@ step. Once it is active, it stays active when the robot docks again.
    turn and pushes it on until it is active. It ends with `All nodes active`; if everything was
    already active, that takes a few seconds. If one node keeps printing `no answer`, see
    [The activation script does not finish](#the-activation-script-does-not-finish).
-8. **T4**, dock again:
+8. **T4**, start `point_path`:
 
    ```bash
-   ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"
+   ros2 run day8pkg point_path
    ```
 
-Leave T1, T2 and T3 running.
+9. In RViz, click **Publish Point** (top toolbar) and click a few points across the room, in
+   open space away from table legs. Each click prints its distance from the previous point in
+   T4. Press **Enter** in T4: the robot drives through the points, each pose facing the next
+   point, and at the end tries to dock (that only works if the last point is near the dock).
 
-### The demo
+Simplest alternative to 8 and 9: in RViz, click **Nav2 Goal** and click-drag a goal on the map;
+the robot drives there. Repeat for more goals.
 
-Clear the floor, keep people away from the path and have someone ready to pick the robot up.
-Plan the path first: for example A → B is 1 m straight, B → C is 1 m after a 90° turn. In RViz
-one grid cell is 1 m. Pick points in open space, away from table legs.
+To stop the robot at any time, press Ctrl-C in T4 (`point_path`), or pick it up.
 
-1. **T4**, start `create_path` with the dock's pose:
+### Optional: create_path on the real robot
 
-   ```bash
-   ros2 run day8pkg create_path --ros-args --params-file src/day8pkg/config/lab_dock.yaml
-   ```
+`create_path` also works here, but it resets the robot's pose to the dock, so it needs the
+dock's pose ([B](#b-measure-the-docks-pose)). After step 7 above, dock the robot
+(`ros2 action send_goal /dock irobot_create_msgs/action/Dock "{}"`), then in T4:
 
-2. In RViz, click **2D Pose Estimate** and drag at A with the arrow toward B, then at B toward
-   C, then at C. Each click prints `Pose n added: (x, y)` in T4. The robot icon jumps to each
-   click; that is expected.
-3. Press **Enter** in T4. It prints the points (show that A → B and B → C are about 1 m), resets
-   the pose to the dock, undocks, checks that Nav2 is active, and drives A → B → C, then docks.
+```bash
+ros2 run day8pkg create_path --ros-args --params-file src/day8pkg/config/lab_dock.yaml
+```
 
-To stop the robot at any time, press Ctrl-C in T4, or pick it up.
+Click A, B and C with **2D Pose Estimate** and press Enter, as in the
+[simulator demo](#demo-in-the-simulator).
 
-## One-time setup
+### One-time setup
 
-Do these once, in this order. Redo A only if the room changes a lot, and B whenever the dock
+Do these once, in this order (B only for the optional `create_path` on the real robot). Redo A only if the room changes a lot, and B whenever the dock
 moves or you make a new map. Mark the dock's place on the floor with tape so it always goes back
 to the same spot.
 
-### PC terminal settings
+#### PC terminal settings
 
 **Every terminal** must have exactly the same settings, or nodes find each other slowly and
 answers get lost. This robot uses a discovery server on the robot (`10.245.131.96` is its IP;
@@ -141,7 +212,7 @@ If it lists nodes, close extra RViz windows and leftover terminals. If robot nod
 `/turtlebot4_node` are listed, reboot the robot (`ssh ubuntu@10.245.131.96`, then
 `sudo reboot`, and wait 2 minutes).
 
-### A. Map the room
+#### A. Map the room
 
 1. Put the robot on the dock. Start SLAM and RViz, each in its own terminal:
 
@@ -174,14 +245,14 @@ If it lists nodes, close extra RViz windows and leftover terminals. If robot nod
 
 5. Stop SLAM with Ctrl-C and drive the robot back onto the dock.
 
-### B. Measure the dock's pose
+#### B. Measure the dock's pose
 
 `create_path` needs the robot's pose **while it is on the dock**, in the map's coordinates. The
 robot cannot measure it on the dock, because the LiDAR is off there (power saver). So measure it
 just outside the dock, then drive back on while recording.
 
 1. With the robot on the dock, start localization (T1) and RViz (T2), as in the
-   [demo](#before-the-instructor-watches-start-localization-and-nav2) steps 2 and 3.
+   [demo](#real-robot-demo) steps 2 and 3.
 2. **T4**, undock, so that the LiDAR turns on.
 3. In RViz, click **2D Pose Estimate** and drag an arrow where the robot is, pointing the way its
    **camera side** faces. Repeat until the red LiDAR points lie on the black walls, including
@@ -314,12 +385,7 @@ and retrying until it is active. `create_path` likewise asks again when an answe
 | `day8pkg/point_path.py` | Other node: path from points clicked with Publish Point |
 | `config/lab_dock.yaml` | The dock's pose on the lab map, for `create_path` |
 | `scripts/activate_nav.bash` | Brings localization and Nav2 to active, retrying lost answers |
-| `scripts/sim*.bash`, `scripts/query_dock.bash` | The course's simulator launchers and dock query, for the [simulator](#in-the-simulator-optional) |
-
-## Extra credit: lab map
-
-The map from [A](#a-map-the-room) counts if it covers at least half of the room. Show the
-instructor `lab_map.pgm` (or the map in RViz), then drive through the room with the demo above.
+| `scripts/sim*.bash`, `scripts/query_dock.bash` | The course's simulator launchers and dock query, for the [simulator](#demo-in-the-simulator) |
 
 ## Other ways to drive
 
@@ -329,18 +395,3 @@ instructor `lab_map.pgm` (or the map in RViz), then drive through the room with 
   which does not move AMCL's pose, so it needs no `lab_dock.yaml`. Undock, set the pose with
   **2D Pose Estimate**, run `ros2 run day8pkg point_path`, click the points and press Enter.
   Each click prints its distance from the previous point.
-
-## In the simulator (optional)
-
-The simulator needs Gazebo and a computer with a GPU; it does not run in a virtual machine (the
-robot never spawns there). It also uses no discovery server: unset `ROS_DISCOVERY_SERVER` and
-`ROS_SUPER_CLIENT` in its terminals. From `robotics_ws`:
-
-```bash
-bash src/day8pkg/scripts/sim.bash
-```
-
-This one command starts Gazebo, localization, Nav2 and RViz. In the simulator the dock is at the
-map origin, so run `ros2 run day8pkg create_path` with no parameters and follow
-[the demo](#the-demo) from step 2. Stop the simulator with Ctrl-C in its terminal, not by
-closing its windows.
