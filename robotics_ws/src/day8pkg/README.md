@@ -273,7 +273,7 @@ To stop the robot at any time, press Ctrl-C in Terminal 3, or pick it up.
 ### Nav2 does not finish starting
 
 `Managed nodes are active` never comes, or `create_path` keeps waiting at
-`Waiting for Nav2 (waypoint_follower) to be active...`.
+`Waiting for Nav2 (bt_navigator, waypoint_follower) to be active...`.
 
 1. See which node it stopped at. Nav2 starts them in this order, and the first one that is not
    `active [3]` is where it hangs:

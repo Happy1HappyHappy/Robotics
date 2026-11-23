@@ -10,6 +10,7 @@
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
   <depend>nav2_msgs</depend>
+  <depend>lifecycle_msgs</depend>
   <exec_depend>turtlebot4_navigation</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

@@ -15,6 +15,7 @@ import threading
 import time
 
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from lifecycle_msgs.srv import GetState
 from nav2_msgs.srv import ClearEntireCostmap
 import rclpy
 from turtlebot4_navigation.turtlebot4_navigator import TurtleBot4Navigator
@@ -38,6 +39,22 @@ def clear_costmaps_with_timeout(navigator, timeout_sec=3.0):
         navigator.destroy_client(client)
 
 
+def wait_until_active(navigator, clients, timeout_sec=5.0):
+    """Like waitUntilNav2Active(), but asks again when an answer gets lost."""
+    for name, client in clients.items():
+        while rclpy.ok():
+            state = 'not available'
+            if client.wait_for_service(timeout_sec=1.0):
+                future = client.call_async(GetState.Request())
+                rclpy.spin_until_future_complete(navigator, future, timeout_sec=timeout_sec)
+                state = future.result().current_state.label if future.done() else 'no answer'
+            if state == 'active':
+                navigator.info(f'{name} is active')
+                break
+            navigator.info(f'{name} is {state}, waiting...')
+            time.sleep(1.0)
+
+
 def main():
     rclpy.init()
     navigator = TurtleBot4Navigator()
@@ -45,6 +62,10 @@ def main():
     dock_x = navigator.declare_parameter('dock_x', 0.0).value              # m
     dock_y = navigator.declare_parameter('dock_y', 0.0).value              # m
     dock_yaw_deg = navigator.declare_parameter('dock_yaw_deg', 0.0).value  # deg, 0 = facing +x
+    # Created now so that Nav2 knows these clients by the time they ask: the first answer to a
+    # brand-new client often gets lost over the robot's discovery server
+    nav2_states = {name: navigator.create_client(GetState, f'{name}/get_state')
+                   for name in ('bt_navigator', 'waypoint_follower')}
     poses = []
 
     def on_pose(msg):
@@ -108,10 +129,9 @@ def main():
             return
     navigator.info('AMCL pose received.')
 
-    # Nav2 can only finish starting once AMCL gives map -> odom (after the undock), and
-    # rejects goals until then. The pose is already received, so this does not re-publish it.
-    navigator.info('Waiting for Nav2 (waypoint_follower) to be active...')
-    navigator.waitUntilNav2Active(navigator='waypoint_follower')
+    # Nav2 rejects goals until its nodes are active
+    navigator.info('Waiting for Nav2 (bt_navigator, waypoint_follower) to be active...')
+    wait_until_active(navigator, nav2_states)
 
     navigator.info('Following waypoints...')
     navigator.startFollowWaypoints(poses)
