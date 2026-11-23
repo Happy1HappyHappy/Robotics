@@ -85,6 +85,10 @@ From `robotics_ws`:
 bash src/day8pkg/scripts/sim.bash
 ```
 
+This one command starts everything `create_path` needs: Gazebo, the map server and AMCL
+(`localization:=true`), Nav2 (`nav2:=true`) and RViz (`rviz:=true`). On the real robot you
+start these yourself (see [create_path on the real robot](#create_path-on-the-real-robot)).
+
 Then, as in class:
 
 1. Wait for Gazebo and RViz to start (press Play in Gazebo if it is paused).
@@ -98,6 +102,9 @@ Stop the simulator with Ctrl-C in its terminal, not by closing its windows, or l
 processes get in the way of the next start.
 
 ## Demo: Create Path
+
+These steps use the simulator. For the real robot with your own map, see
+[create_path on the real robot](#create_path-on-the-real-robot).
 
 Plan the path first, for example an L: A → B is 1 m straight, B → C is 1 m after a 90° turn.
 RViz's grid cells are 1 m (Grid display, Cell Size). Pick the points in open space, where the
@@ -185,7 +192,41 @@ Connect to the robot (see [`related_cmds.txt`](../../../related_cmds.txt)), then
 
 On the real robot, clear the floor, keep it slow and have someone ready to pick it up.
 
-### create_path on your map
+### create_path on the real robot
+
+Unlike `sim.bash`, nothing here starts the map, AMCL, Nav2 or RViz for you. Run the
+[Setup](../../README.md#setup) lines in every terminal, plus `source install/setup.bash` (in
+`robotics_ws`) in the one for `create_path`. With the robot on the dock, start these in order,
+each in its own terminal, letting each finish starting before the next:
+
+1. The map server and AMCL (localization), with the full path to your map:
+
+   ```bash
+   ros2 launch turtlebot4_navigation localization.launch.py map:=$HOME/lab_map.yaml
+   ```
+
+2. Nav2:
+
+   ```bash
+   ros2 launch turtlebot4_navigation nav2.launch.py
+   ```
+
+3. RViz:
+
+   ```bash
+   ros2 launch turtlebot4_viz view_navigation.launch.py
+   ```
+
+4. The first time with a map only: [measure the dock's pose](#measure-the-docks-pose).
+5. `create_path`, with the dock's pose:
+
+   ```bash
+   ros2 run day8pkg create_path --ros-args -p dock_x:=1.25 -p dock_y:=-0.40 -p dock_yaw_deg:=90.0
+   ```
+
+   Then click the path and press Enter, as in the [simulator demo](#demo-create-path).
+
+#### Measure the dock's pose
 
 `create_path` resets the robot's pose to the dock, which it takes to be at (0, 0) facing +x
 unless told otherwise. On a SLAM map, (0, 0) is where the robot was when mapping started
@@ -193,8 +234,7 @@ unless told otherwise. On a SLAM map, (0, 0) is where the robot was when mapping
 dock. The `origin` in `lab_map.yaml` is something else: where the image's lower-left corner
 is on the map.
 
-Measure the dock's pose once, with localization, Nav2 and RViz running and the robot on the
-dock:
+Measure it once, with steps 1-3 above running and the robot on the dock:
 
 1. Undock, so that the LiDAR turns on (the power saver turns it off on the dock). If the action
    is not found, check the names with `ros2 action list -t`.
@@ -218,11 +258,15 @@ dock:
    ros2 run tf2_ros tf2_echo map base_link
    ```
 
-5. Pass them to `create_path`, each with a decimal point (`90.0`, not `90`), for example:
+   If it keeps printing `Lookup would require extrapolation into the past`, the LiDAR is off on
+   the dock, so AMCL has stopped updating `map` → `odom`. Turn the LiDAR on (check the service
+   name with `ros2 service list | grep motor`), wait a few seconds and run `tf2_echo` again:
 
    ```bash
-   ros2 run day8pkg create_path --ros-args -p dock_x:=1.25 -p dock_y:=-0.40 -p dock_yaw_deg:=90.0
+   ros2 service call /start_motor std_srvs/srv/Empty "{}"
    ```
+
+5. Use them in step 5 above, each with a decimal point (`90.0`, not `90`).
 
 The values hold as long as the dock stays put and you use the same map. If all three come out
 close to 0, mapping did start on the dock and the defaults are fine.
