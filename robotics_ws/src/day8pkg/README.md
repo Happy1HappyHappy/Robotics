@@ -1,9 +1,11 @@
 # day8pkg
 
-Python package for CS 5335 Project 8 (TurtleBot 4 and Nav2 tutorials). Project 8 runs the
-TurtleBot 4 user manual's tutorials in the Gazebo simulator: RViz, generating a map,
-navigation, and the TurtleBot 4 Navigator. The last one, **Create Path**, is the part
-demonstrated in class, and it is the code here:
+Python package for CS 5335 Project 8 (TurtleBot 4 and Nav2 tutorials). Project 8 works through
+the TurtleBot 4 user manual's tutorials: RViz, generating a map, navigation, and the TurtleBot 4
+Navigator. The demo is the Navigator's
+[Create Path](https://turtlebot.github.io/turtlebot4-user-manual/tutorials/turtlebot4_navigator.html#create-path)
+on the real robot with a map of the room. Like the tutorial, it needs no simulator (Gazebo).
+The code here:
 
 - **`create_path`** (`ros2 run day8pkg create_path`): the tutorial's Create Path. Click
   poses in RViz with **2D Pose Estimate**, press Enter, and the robot undocks, drives through
@@ -11,7 +13,8 @@ demonstrated in class, and it is the code here:
 - **`point_path`** (`ros2 run day8pkg point_path`): the same with **Publish Point**, which
   leaves localization alone and logs how far each point is from the previous one.
 
-`scripts/` holds the course's simulator launchers and dock query from Canvas.
+`scripts/` holds the course's simulator launchers and dock query from Canvas, for the
+optional [simulator runs](#in-the-simulator-optional).
 
 The assignment asks for a path with at least two segments of about 1 m with an angle between
 them.
@@ -37,7 +40,7 @@ create_path:
 ```mermaid
 flowchart LR
     rviz["RViz<br>robot visualizer"] -->|"clicked poses / points"| app["create_path / point_path<br>(our node)"]
-    app -->|"undock, dock"| bot["TurtleBot 4<br>(simulator)"]
+    app -->|"undock, dock"| bot["TurtleBot 4"]
     app -->|"pose, waypoints"| nav["Nav2<br>AMCL, planner, controller"]
     bot -->|"scan, odom"| nav
     nav -->|cmd_vel| bot
@@ -66,9 +69,7 @@ costmaps cannot place the LiDAR scans on the map.
 ## Build
 
 The nodes need the TurtleBot 4 navigation package (`turtlebot4_navigation`, which has
-`TurtleBot4Navigator`), and the scripts need the TurtleBot 4 Gazebo simulator
-(`turtlebot4_gz_bringup`). Run the simulator on a computer with a GPU (see
-[Troubleshooting](#troubleshooting)).
+`TurtleBot4Navigator`). Only the simulator scripts need Gazebo (`turtlebot4_gz_bringup`).
 
 From `robotics_ws`:
 
@@ -77,81 +78,30 @@ colcon build --packages-select day8pkg
 source install/setup.bash
 ```
 
-## Run the simulation
+## Demo: Create Path on the real robot
 
-From `robotics_ws`:
+This follows the tutorial: a map of the room, then localization, Nav2 and RViz on the PC, then
+`create_path`. Connect to the robot (see [`related_cmds.txt`](../../../related_cmds.txt)) and
+run the [Setup](../../README.md#setup) lines in every terminal, plus `source install/setup.bash`
+(in `robotics_ws`) in the one for `create_path`.
 
-```bash
-bash src/day8pkg/scripts/sim.bash
-```
+Clear the floor, keep it slow and have someone ready to pick the robot up.
 
-This one command starts everything `create_path` needs: Gazebo, the map server and AMCL
-(`localization:=true`), Nav2 (`nav2:=true`) and RViz (`rviz:=true`). On the real robot you
-start these yourself (see [create_path on the real robot](#create_path-on-the-real-robot)).
+### 1. Map the room (once)
 
-Then, as in class:
+Start with the robot on the dock: the map's (0, 0) is where the robot is when SLAM starts, so
+`create_path` then needs no [dock pose](#3-measure-the-docks-pose-once-per-map).
 
-1. Wait for Gazebo and RViz to start (press Play in Gazebo if it is paused).
-2. Set the robot's pose with **2D Pose Estimate** in RViz.
-3. Wait for the costmaps to show up.
-4. Undock in Gazebo and wait for it to finish.
-5. Check the dock status: `bash src/day8pkg/scripts/query_dock.bash` prints `is_docked: false`.
-6. Set a goal with **Nav2 Goal** in RViz.
-
-Stop the simulator with Ctrl-C in its terminal, not by closing its windows, or leftover
-processes get in the way of the next start.
-
-## Demo: Create Path
-
-These steps use the simulator. For the real robot with your own map, see
-[create_path on the real robot](#create_path-on-the-real-robot).
-
-Plan the path first, for example an L: A → B is 1 m straight, B → C is 1 m after a 90° turn.
-RViz's grid cells are 1 m (Grid display, Cell Size). Pick the points in open space, where the
-costmap has no color.
-
-1. Start the simulator fresh with `sim.bash` and leave the robot on its dock. Do **not** set a
-   pose or undock by hand: `create_path` assumes the robot starts on the dock, which in the
-   simulator is at the map origin.
-2. In a second terminal:
-
-   ```bash
-   ros2 run day8pkg create_path
-   ```
-
-3. In RViz, choose **2D Pose Estimate** and click-drag at A with the arrow toward B, then at B
-   toward C, then at C. Each click logs `Pose n added: (x, y)`. The robot jumps to each click in
-   RViz, because the tool also sets AMCL's pose; `create_path` resets it later.
-4. Press Enter in the `create_path` terminal. The logged points show A → B and B → C are about
-   1 m, in different directions.
-5. Watch it dock if needed, reset the pose to (0, 0), clear the costmaps, undock, follow
-   A → B → C and dock.
-
-The final dock expects the last pose to be near the dock. If C is far from it, add one more
-point near the dock.
-
-### With Publish Point instead
-
-1. Start the simulator and set the pose once with **2D Pose Estimate**. The robot can stay
-   docked.
-2. Run `ros2 run day8pkg point_path`.
-3. Click A, B and C with **Publish Point**. Each click logs its distance from the previous
-   point, so 1 m segments are easy to hit. Press Enter.
-4. It undocks if docked, follows the points with each pose facing the next point, and docks.
-
-## Extra credit: lab map (real robot)
-
-Connect to the robot (see [`related_cmds.txt`](../../../related_cmds.txt)), then:
-
-1. Start SLAM and RViz, each in its own terminal:
+1. Start SLAM and RViz, each in its own terminal, then undock:
 
    ```bash
    ros2 launch turtlebot4_navigation slam.launch.py
    ros2 launch turtlebot4_viz view_navigation.launch.py
+   ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
    ```
 
-2. Drive slowly around at least half the room with the keyboard, from a third terminal,
-   watching the map fill in RViz. Keep people out of the area while mapping.
+2. Drive slowly around the room with the keyboard, from another terminal, watching the map fill
+   in RViz. Keep people out of the area while mapping.
 
    ```bash
    ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true
@@ -172,32 +122,20 @@ Connect to the robot (see [`related_cmds.txt`](../../../related_cmds.txt)), then
    press `z` about 9 times, to about 0.2 m/s and 0.4 rad/s; slow turns keep the map sharp.
    Hold a key to keep moving. The robot stops shortly after you let go, but press `k` to stop
    at once.
-3. Save the map. This writes `lab_map.pgm` (the image) and `lab_map.yaml` to the current
-   directory:
+3. Save the map **before** stopping SLAM, which holds it only in memory. This writes
+   `lab_map.pgm` (the image) and `lab_map.yaml` to the current directory:
 
    ```bash
    ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap "name:
      data: 'lab_map'"
    ```
 
-4. Stop SLAM, then start localization with the map and Nav2, each in its own terminal:
+4. Stop SLAM with Ctrl-C and drive the robot back onto the dock.
 
-   ```bash
-   ros2 launch turtlebot4_navigation localization.launch.py map:=lab_map.yaml
-   ros2 launch turtlebot4_navigation nav2.launch.py
-   ```
+### 2. Start localization, Nav2 and RViz
 
-5. In RViz, set the pose with **2D Pose Estimate** and drive with **Nav2 Goal** (or
-   `point_path`).
-
-On the real robot, clear the floor, keep it slow and have someone ready to pick it up.
-
-### create_path on the real robot
-
-Unlike `sim.bash`, nothing here starts the map, AMCL, Nav2 or RViz for you. Run the
-[Setup](../../README.md#setup) lines in every terminal, plus `source install/setup.bash` (in
-`robotics_ws`) in the one for `create_path`. With the robot on the dock, start these in order,
-each in its own terminal, letting each finish starting before the next:
+With the robot on the dock, start these in order, each in its own terminal, letting each finish
+starting before the next:
 
 1. The map server and AMCL (localization), with the full path to your map:
 
@@ -217,16 +155,7 @@ each in its own terminal, letting each finish starting before the next:
    ros2 launch turtlebot4_viz view_navigation.launch.py
    ```
 
-4. The first time with a map only: [measure the dock's pose](#measure-the-docks-pose).
-5. `create_path`, with the dock's pose:
-
-   ```bash
-   ros2 run day8pkg create_path --ros-args -p dock_x:=1.25 -p dock_y:=-0.40 -p dock_yaw_deg:=90.0
-   ```
-
-   Then click the path and press Enter, as in the [simulator demo](#demo-create-path).
-
-#### Measure the dock's pose
+### 3. Measure the dock's pose (once per map)
 
 `create_path` resets the robot's pose to the dock, which it takes to be at (0, 0) facing +x
 unless told otherwise. On a SLAM map, (0, 0) is where the robot was when mapping started
@@ -234,7 +163,7 @@ unless told otherwise. On a SLAM map, (0, 0) is where the robot was when mapping
 dock. The `origin` in `lab_map.yaml` is something else: where the image's lower-left corner
 is on the map.
 
-Measure it once, with steps 1-3 above running and the robot on the dock:
+Measure it once, with step 2 running and the robot on the dock:
 
 1. Undock, so that the LiDAR turns on (the power saver turns it off on the dock). If the action
    is not found, check the names with `ros2 action list -t`.
@@ -266,24 +195,93 @@ Measure it once, with steps 1-3 above running and the robot on the dock:
    ros2 service call /start_motor std_srvs/srv/Empty "{}"
    ```
 
-5. Use them in step 5 above, each with a decimal point (`90.0`, not `90`).
-
 The values hold as long as the dock stays put and you use the same map. If all three come out
-close to 0, mapping did start on the dock and the defaults are fine.
+close to 0, mapping did start on the dock and `create_path` needs no parameters.
 
 Shifting the `origin` in `lab_map.yaml` by the dock's x and y would also move (0, 0) onto the
 dock, but it cannot turn the map, so the dock's heading would still be off.
 
+### 4. Run create_path
+
+Plan the path first, for example an L: A → B is 1 m straight, B → C is 1 m after a 90° turn.
+RViz's grid cells are 1 m (Grid display, Cell Size). Pick the points in open space, where the
+costmap has no color.
+
+1. Leave the robot on its dock. Do **not** set a pose or undock by hand: `create_path` does
+   both.
+2. Run it with the dock's pose from step 3, each value with a decimal point (`90.0`, not `90`),
+   or with no parameters if the dock is at (0, 0) facing +x:
+
+   ```bash
+   ros2 run day8pkg create_path --ros-args -p dock_x:=1.25 -p dock_y:=-0.40 -p dock_yaw_deg:=90.0
+   ```
+
+3. In RViz, choose **2D Pose Estimate** and click-drag at A with the arrow toward B, then at B
+   toward C, then at C. Each click logs `Pose n added: (x, y)`. The robot jumps to each click in
+   RViz, because the tool also sets AMCL's pose; `create_path` resets it later.
+4. Press Enter in the `create_path` terminal. The logged points show A → B and B → C are about
+   1 m, in different directions.
+5. Watch it dock if needed, reset the pose to the dock, clear the costmaps, undock, follow
+   A → B → C and dock.
+
+The final dock expects the last pose to be near the dock. If C is far from it, add one more
+point near the dock.
+
+### With Publish Point instead
+
+This needs no dock pose, because it never resets the robot's pose.
+
+1. With step 2 running, undock, then set the robot's pose with **2D Pose Estimate** until the
+   LiDAR points line up with the walls on the map.
+2. Run `ros2 run day8pkg point_path`.
+3. Click A, B and C with **Publish Point**. Each click logs its distance from the previous
+   point, so 1 m segments are easy to hit. Press Enter.
+4. It follows the points with each pose facing the next point, and docks.
+
+## Extra credit: lab map
+
+The map from [step 1](#1-map-the-room-once) counts if it covers at least half of the room.
+Show the instructor `lab_map.pgm` (or the map in RViz), then drive through the mapped area with
+`create_path`, or set the pose with **2D Pose Estimate** and drive with **Nav2 Goal**.
+
+## In the simulator (optional)
+
+The simulator needs Gazebo and a computer with a GPU; it does not run in a virtual machine (see
+[Troubleshooting](#troubleshooting)). From `robotics_ws`:
+
+```bash
+bash src/day8pkg/scripts/sim.bash
+```
+
+This one command starts everything `create_path` needs: Gazebo, the map server and AMCL
+(`localization:=true`), Nav2 (`nav2:=true`) and RViz (`rviz:=true`).
+
+Then, as in class:
+
+1. Wait for Gazebo and RViz to start (press Play in Gazebo if it is paused).
+2. Set the robot's pose with **2D Pose Estimate** in RViz.
+3. Wait for the costmaps to show up.
+4. Undock in Gazebo and wait for it to finish.
+5. Check the dock status: `bash src/day8pkg/scripts/query_dock.bash` prints `is_docked: false`.
+6. Set a goal with **Nav2 Goal** in RViz.
+
+To run `create_path` in the simulator, start it fresh, leave the robot on its dock (which is at
+the map origin there) and run `ros2 run day8pkg create_path` without parameters, then follow
+[step 4](#4-run-create_path) from 3 on.
+
+Stop the simulator with Ctrl-C in its terminal, not by closing its windows, or leftover
+processes get in the way of the next start.
+
 ## Troubleshooting
 
-- **The robot does not spawn**: the log keeps printing `Waiting messages on topic
-  [robot_description]`, and the spawners for `joint_state_broadcaster` and
-  `diffdrive_controller` die. This happened in a VMware virtual machine; run the simulator on
-  a computer with a GPU.
 - **Nav2 never becomes active while docked**: the power saver turns the LiDAR off on the dock,
   so AMCL cannot answer and `waitUntilNav2Active()` keeps re-publishing the pose.
   `create_path` undocks first and then waits up to 30 s for AMCL.
 - **Clearing the costmaps hangs**: `clearAllCostmaps()` waits forever for the services, so
   `create_path` gives up after 3 s per costmap and goes on.
-- **No topics from the simulator**: every terminal needs the same `ROS_DOMAIN_ID`, and
+- **No topics**: every terminal needs the same `ROS_DOMAIN_ID`. For the simulator,
   `ROS_DISCOVERY_SERVER` (used for the real robot) must not be set.
+- **The simulated robot does not spawn**: the log keeps printing `Waiting messages on topic
+  [robot_description]`, and the spawners for `joint_state_broadcaster` and
+  `diffdrive_controller` die. This happened in a VMware virtual machine; run the simulator on
+  a computer with a GPU.
