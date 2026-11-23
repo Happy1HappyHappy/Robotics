@@ -1,0 +1,21 @@
+# Cone driver settings to tune in the lab. Run from the workspace root (robotics_ws), so an
+# edit takes effect on the next run without rebuilding:
+#   ros2 run cs5335_cones cone_driver --ros-args --params-file src/cs5335_cones/config/cones.yaml
+# Write floats with a decimal point (0.3, not 0): a parameter keeps its declared type.
+cone_driver:
+  ros__parameters:
+    # Colors of the three cones, from: red, orange, yellow, green, blue, purple, pink
+    colors: ['orange', 'green', 'blue']
+
+    # HSV range of each color: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi], OpenCV's scale
+    # (H 0-179, S and V 0-255); h_lo > h_hi wraps through 0 (red)
+    hsv:
+      orange: [5, 120, 100, 18, 255, 255]
+      green: [40, 80, 50, 85, 255, 255]
+      blue: [95, 120, 50, 130, 255, 255]
+    min_area: 50              # px, a smaller blob is noise, not a cone
+
+    turn_speed: 0.3           # rad/s, Task 1's turn
+    # rad, how far the LiDAR is turned on the robot (counter-clockwise). Check with:
+    #   ros2 run tf2_ros tf2_echo base_link rplidar_link
+    lidar_yaw: 1.5708
