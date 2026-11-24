@@ -71,19 +71,14 @@ no `lab_dock.yaml` here. You do not need to undock by hand or use `query_dock.ba
    It prints `Simulator settings: ROS_DOMAIN_ID=8, this computer only`. It switches off the real
    robot's discovery server (which your `.bashrc` may set) and keeps ROS to this computer. Without
    it, the simulator's own nodes may not find each other, and the robot never appears.
-2. In T1, restart the ROS daemon so that it uses these settings too:
+2. In T1, stop anything left from an earlier run. Do this before **every** start: a second run
+   that collides with leftovers from the first one fails (no map, `Waiting for service ...`
+   forever, a slow Gazebo). It stops every ROS 2 program on this computer, restarts the ROS
+   daemon with these settings, and ends with `All clean`:
 
    ```bash
-   ros2 daemon stop; ros2 daemon start
+   bash ~/Robotics/robotics_ws/src/day8pkg/scripts/sim_reset.bash
    ```
-
-3. In T1, check that nothing is left from an earlier run (this must print nothing):
-
-   ```bash
-   ps aux | grep -E "gz sim|parameter_bridge|robot_state_publisher|amcl|bt_navigator" | grep -v grep
-   ```
-
-   If it prints lines, stop them with `kill <number>`, the number being the second column.
 
 ### 3. Start the simulator (T1)
 
@@ -137,15 +132,16 @@ before clicking, so that it is connected to RViz.
    (`... is active`), prints `Following waypoints...`, and the robot drives A → B → C in Gazebo
    and RViz, then docks.
 
-### 7. Stop
+### 7. Stop, or start over
 
-Press Ctrl-C in T2, then in T1. Do not just close the windows: leftover processes get in the way
-of the next start (step 2.3 finds them).
+Press Ctrl-C in T2, then in T1, then run `sim_reset.bash` (step 2.2) so that nothing is left. To
+start over at any point, do the same and go back to [step 3](#3-start-the-simulator-t1).
 
 ### If something goes wrong in the simulator
 
 | What you see | Why | What to do |
 | ------------ | --- | ---------- |
+| It worked the first time, but now RViz shows no map and T1 keeps printing `Waiting for service map_server/get_state...` or `controller_server/get_state...` | Programs from an earlier run are still running and collide with the new ones | Ctrl-C in T1 and T2, run `sim_reset.bash`, and start again from [step 3](#3-start-the-simulator-t1) |
 | T1 keeps printing `Waiting messages on topic [robot_description]`; no robot appears | The simulator's nodes cannot reach each other: usually T1 lacks the simulator settings (it still points at the real robot), or something is left from an earlier run | Ctrl-C in T1, then redo [step 2](#2-set-up-both-terminals-every-time) and start again. If it still waits, scroll up in T1 for lines starting with `[robot_state_publisher` that say `ERROR` |
 | `Package 'turtlebot4_gz_bringup' not found` | The simulator is not installed | [Step 1](#1-prepare-the-computer-once-per-computer) |
 | The robot appears, but there are no red LiDAR points and no costmaps | No GPU (the simulated LiDAR needs one), or the pose is not set | Use a computer with a GPU; set the pose ([step 4](#4-set-the-start-pose-rviz)) |
@@ -470,6 +466,7 @@ and retrying until it is active. `create_path` likewise asks again when an answe
 | `config/lab_dock.yaml` | The dock's pose on the lab map, for `create_path` |
 | `scripts/activate_nav.bash` | Brings localization and Nav2 to active, retrying lost answers |
 | `scripts/sim_env.bash` | ROS settings for every simulator terminal (`source` it) |
+| `scripts/sim_reset.bash` | Stops everything an earlier simulator run left behind |
 | `scripts/sim.bash`, `sim_depot.bash`, `sim_maze.bash`, `query_dock.bash` | The course's simulator launchers and dock query, for the [simulator](#demo-in-the-simulator) |
 
 ## Other ways to drive
