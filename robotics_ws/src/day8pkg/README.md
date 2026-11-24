@@ -16,60 +16,144 @@ Ask the instructor if unsure which one the demo needs.
 
 ## Demo in the simulator
 
-Gazebo plays the robot and the room (the course's warehouse world, with its map). One script
-starts Gazebo, localization, Nav2 and RViz; `create_path` then runs in a second terminal. The
-simulated dock is at the map origin, so `create_path` needs no `lab_dock.yaml` here.
+Gazebo plays the robot and the room (the course's warehouse world, with its map). It needs a
+computer with a GPU; it does not work in a virtual machine. Use two terminals:
 
-### Setup (once, on the GPU computer)
+| Terminal | Runs |
+| -------- | ---- |
+| T1 | The simulator: Gazebo, localization, Nav2 and RViz, all started by `sim.bash` |
+| T2 | `create_path` |
 
-In **every** terminal (the simulator uses no discovery server; pick one `ROS_DOMAIN_ID` that no
-one else near you uses, and use the same one in every terminal):
+The robot starts on its dock, which in this world is at the map origin, so `create_path` needs
+no `lab_dock.yaml` here. You do not need to undock by hand or use `query_dock.bash`.
 
-```bash
-source /opt/ros/jazzy/setup.bash
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export ROS_DOMAIN_ID=8
-unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT
-```
+### 1. Prepare the computer (once per computer)
 
-Get the code and build it (`git clone` the repository first if this computer does not have it):
-
-```bash
-cd ~/Robotics && git pull
-cd robotics_ws
-colcon build --packages-select day8pkg
-source install/setup.bash
-```
-
-### Run it
-
-1. **Terminal 1**, in `robotics_ws`, start the simulator:
+1. Check that ROS 2 Jazzy and the TurtleBot 4 packages are installed:
 
    ```bash
-   bash src/day8pkg/scripts/sim.bash
+   source /opt/ros/jazzy/setup.bash
+   ros2 pkg list | grep -E "^turtlebot4_(gz_bringup|navigation|viz)$"
    ```
 
-   Wait until Gazebo and RViz are up and the map shows (press Play in Gazebo if it is paused).
-   The robot starts on its dock.
-2. In RViz, click **2D Pose Estimate** and drag an arrow on the robot, pointing the way it
-   faces, then wait for the costmaps to show up. Nav2 needs this first pose to finish starting.
-3. **Terminal 2**, in `robotics_ws` (after `source install/setup.bash`):
+   All three names must print. If one is missing, install them (this needs `sudo`; on a lab
+   computer, ask the TA):
 
    ```bash
-   ros2 run day8pkg create_path
+   sudo apt update
+   sudo apt install ros-jazzy-turtlebot4-simulator ros-jazzy-turtlebot4-desktop ros-jazzy-turtlebot4-navigation
    ```
 
-4. Plan an L in open space near the robot (one RViz grid cell is 1 m). In RViz, click
-   **2D Pose Estimate** and drag at A with the arrow toward B, then at B toward C, then at C.
-   Each click prints `Pose n added: (x, y)` in Terminal 2; the robot icon jumps to each click,
-   which is expected.
-5. Press **Enter** in Terminal 2. It prints the points (show that A → B and B → C are about
-   1 m), resets the pose to the dock, undocks, waits for Nav2, drives A → B → C and docks.
+2. Get the code. If `~/Robotics` does not exist on this computer yet, clone it first:
 
-If Terminal 2 keeps printing `... is inactive, waiting...`, run
-`bash src/day8pkg/scripts/activate_nav.bash` in a third terminal. Stop the simulator with Ctrl-C
-in Terminal 1, not by closing its windows, or leftover processes get in the way of the next
-start.
+   ```bash
+   cd ~ && git clone https://github.com/Happy1HappyHappy/Robotics.git
+   ```
+
+   Then update and build it:
+
+   ```bash
+   cd ~/Robotics && git pull
+   cd robotics_ws
+   colcon build --packages-select day8pkg
+   ```
+
+   The build must end with `Summary: 1 package finished`.
+
+### 2. Set up both terminals (every time)
+
+1. Open T1 and T2. In **each** one, run:
+
+   ```bash
+   source ~/Robotics/robotics_ws/src/day8pkg/scripts/sim_env.bash
+   ```
+
+   It prints `Simulator settings: ROS_DOMAIN_ID=8, this computer only`. It switches off the real
+   robot's discovery server (which your `.bashrc` may set) and keeps ROS to this computer. Without
+   it, the simulator's own nodes may not find each other, and the robot never appears.
+2. In T1, restart the ROS daemon so that it uses these settings too:
+
+   ```bash
+   ros2 daemon stop; ros2 daemon start
+   ```
+
+3. In T1, check that nothing is left from an earlier run (this must print nothing):
+
+   ```bash
+   ps aux | grep -E "gz sim|parameter_bridge|robot_state_publisher|amcl|bt_navigator" | grep -v grep
+   ```
+
+   If it prints lines, stop them with `kill <number>`, the number being the second column.
+
+### 3. Start the simulator (T1)
+
+```bash
+cd ~/Robotics/robotics_ws
+bash src/day8pkg/scripts/sim.bash
+```
+
+Give it one or two minutes, then check:
+
+- The Gazebo window shows the warehouse **with the robot on its dock**. If Gazebo is paused, press
+  ▶ (bottom left).
+- RViz shows the map of the warehouse and the robot.
+
+If T1 keeps printing `Waiting messages on topic [robot_description]` and no robot appears, see
+[the table below](#if-something-goes-wrong-in-the-simulator).
+
+### 4. Set the start pose (RViz)
+
+1. In RViz, click **2D Pose Estimate**, press on the robot (at the middle of the grid) and drag
+   in the direction it faces.
+2. Within about 30 s the **costmaps** appear: colored bands along the walls, and red LiDAR points
+   on the walls. This means Nav2 has finished starting.
+
+If no costmap appears after a minute, run this in T2 and wait for `All nodes active`:
+
+```bash
+bash ~/Robotics/robotics_ws/src/day8pkg/scripts/activate_nav.bash
+```
+
+### 5. Start create_path (T2)
+
+```bash
+cd ~/Robotics/robotics_ws
+ros2 run day8pkg create_path
+```
+
+It prints `Click poses with "2D Pose Estimate" in RViz, then press Enter here.` Wait about 10 s
+before clicking, so that it is connected to RViz.
+
+### 6. Click the path and run it
+
+1. Plan an L in open space near the robot: A → B is 1 m straight, B → C is 1 m after a 90° turn.
+   One RViz grid cell is 1 m.
+2. In RViz, click **2D Pose Estimate** and drag at A with the arrow toward B. T2 prints
+   `Pose 1 added: (x, y)`. Do the same at B (arrow toward C) and at C. The robot icon jumps to
+   each click; that is expected, and `create_path` puts it back later.
+3. Show the instructor the three `Pose n added` lines: A → B and B → C are about 1 m, in
+   different directions.
+4. Press **Enter** in T2. It resets the robot's pose to the dock, undocks, waits for Nav2
+   (`... is active`), prints `Following waypoints...`, and the robot drives A → B → C in Gazebo
+   and RViz, then docks.
+
+### 7. Stop
+
+Press Ctrl-C in T2, then in T1. Do not just close the windows: leftover processes get in the way
+of the next start (step 2.3 finds them).
+
+### If something goes wrong in the simulator
+
+| What you see | Why | What to do |
+| ------------ | --- | ---------- |
+| T1 keeps printing `Waiting messages on topic [robot_description]`; no robot appears | The simulator's nodes cannot reach each other: usually T1 lacks the simulator settings (it still points at the real robot), or something is left from an earlier run | Ctrl-C in T1, then redo [step 2](#2-set-up-both-terminals-every-time) and start again. If it still waits, scroll up in T1 for lines starting with `[robot_state_publisher` that say `ERROR` |
+| `Package 'turtlebot4_gz_bringup' not found` | The simulator is not installed | [Step 1](#1-prepare-the-computer-once-per-computer) |
+| The robot appears, but there are no red LiDAR points and no costmaps | No GPU (the simulated LiDAR needs one), or the pose is not set | Use a computer with a GPU; set the pose ([step 4](#4-set-the-start-pose-rviz)) |
+| No costmaps a minute after setting the pose | Nav2 is half-started | Run `activate_nav.bash` ([step 4](#4-set-the-start-pose-rviz)) |
+| Clicking with 2D Pose Estimate prints nothing in T2 | T2 lacks the simulator settings, or `create_path` had just started | Ctrl-C in T2, `source` `sim_env.bash` again, restart `create_path`, wait 10 s. `ros2 topic info /initialpose -v` must list `basic_navigator` under the subscriptions |
+| T2 keeps printing `... is inactive, waiting...` | Nav2 is half-started | Run `activate_nav.bash` in a third terminal (after `source`-ing `sim_env.bash`). **The robot starts driving as soon as it succeeds** |
+| `ros2 run day8pkg create_path` is not found, or `sim_env.bash` says `not built yet` | `day8pkg` is not built | Build it ([step 1](#1-prepare-the-computer-once-per-computer)), then `source` `sim_env.bash` again |
+| Gazebo or RViz show a second robot, or nodes appear twice in `ros2 node list` | Another simulator on the same network and `ROS_DOMAIN_ID` | `sim_env.bash` keeps ROS to this computer; check it is sourced in every terminal |
 
 ## Extra credit: the real robot
 
@@ -385,7 +469,8 @@ and retrying until it is active. `create_path` likewise asks again when an answe
 | `day8pkg/point_path.py` | Other node: path from points clicked with Publish Point |
 | `config/lab_dock.yaml` | The dock's pose on the lab map, for `create_path` |
 | `scripts/activate_nav.bash` | Brings localization and Nav2 to active, retrying lost answers |
-| `scripts/sim*.bash`, `scripts/query_dock.bash` | The course's simulator launchers and dock query, for the [simulator](#demo-in-the-simulator) |
+| `scripts/sim_env.bash` | ROS settings for every simulator terminal (`source` it) |
+| `scripts/sim.bash`, `sim_depot.bash`, `sim_maze.bash`, `query_dock.bash` | The course's simulator launchers and dock query, for the [simulator](#demo-in-the-simulator) |
 
 ## Other ways to drive
 
