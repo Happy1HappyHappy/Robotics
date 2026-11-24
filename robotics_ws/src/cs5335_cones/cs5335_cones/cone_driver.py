@@ -118,6 +118,13 @@ class ConeDriver(Node):
         self._hazard = None         # name of the latest bump or cliff
         self._hazard_time = None
 
+        # Counters for the low-rate health heartbeat. These show what this node has
+        # received and published; they do not prove the robot controller received it.
+        self._cmd_count = 0
+        self._cmd_linear = None
+        self._cmd_angular = None
+        self._cmd_time = None
+
         self._cmd_pub = self.create_publisher(TwistStamped, 'cmd_vel', 10)
         self.create_subscription(Image, 'oakd/rgb/preview/image_raw',
                                  self._image_callback, qos_profile_sensor_data)
@@ -127,6 +134,7 @@ class ConeDriver(Node):
                                  self._odom_callback, qos_profile_sensor_data)
         self.create_subscription(HazardDetectionVector, 'hazard_detection',
                                  self._hazard_callback, qos_profile_sensor_data)
+        self._health_timer = self.create_timer(2.0, self._health_callback)
 
     def _declare(self, name, default, description, low=None, high=None):
         """Declare a read-only parameter, with a range if low and high are given."""
@@ -177,6 +185,40 @@ class ConeDriver(Node):
             return None
         return (self.get_clock().now() - stamp).nanoseconds / 1e9
 
+    def _health_callback(self):
+        """Log sensor freshness and this node's cmd_vel publishing activity every 2 s."""
+        sensors = (
+            ('image', self._image_time),
+            ('scan', self._front_time),
+            ('odom', self._yaw_time),
+        )
+        statuses = []
+        stale = []
+        for name, stamp in sensors:
+            age = self._age(stamp)
+            if age is None:
+                statuses.append(f'{name}=missing')
+                stale.append(name)
+            else:
+                statuses.append(f'{name}={age:.2f}s')
+                if age > self._data_timeout:
+                    stale.append(name)
+
+        cmd_age = self._age(self._cmd_time)
+        if cmd_age is None:
+            command = f'cmd_vel=never published ({self._cmd_count} msgs/2s)'
+        else:
+            command = (f'cmd_vel={self._cmd_linear:+.2f} m/s, '
+                       f'{self._cmd_angular:+.2f} rad/s, age={cmd_age:.2f}s '
+                       f'({self._cmd_count} msgs/2s)')
+        self._cmd_count = 0
+
+        message = 'Health: ' + ', '.join(statuses) + '; ' + command
+        if stale:
+            self.get_logger().warn(message + '; unavailable/stale: ' + ', '.join(stale))
+        else:
+            self.get_logger().info(message)
+
     def _fresh_yaw(self):
         """Return the latest yaw; raise Abort if odometry stopped arriving."""
         age = self._age(self._yaw_time)
@@ -199,6 +241,10 @@ class ConeDriver(Node):
         msg.twist.linear.x = max(-MAX_LINEAR_SPEED, min(MAX_LINEAR_SPEED, float(linear)))
         msg.twist.angular.z = max(-MAX_ANGULAR_SPEED, min(MAX_ANGULAR_SPEED, float(angular)))
         self._cmd_pub.publish(msg)
+        self._cmd_count += 1
+        self._cmd_linear = msg.twist.linear.x
+        self._cmd_angular = msg.twist.angular.z
+        self._cmd_time = self.get_clock().now()
 
     def _step(self, linear, angular):
         """
