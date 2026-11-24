@@ -50,6 +50,8 @@ MAX_LINEAR_SPEED = 0.15         # m/s (the TurtleBot 4 can do 0.31)
 MAX_ANGULAR_SPEED = 0.8         # rad/s (the TurtleBot 4 can do 1.9)
 TASK2_LINEAR_SPEED = 0.08       # m/s, keep the approach slow
 TASK2_TURN_SPEED = 0.25         # rad/s, slow alignment and heading turns
+TASK2_ALIGNMENT_DISTANCE = 1.0  # m, odometry distance before the camera realignment
+RETURN_PATH_SAMPLE = 0.10       # m, record an odometry point this often on the way out
 
 # Hazards that stop the robot, with the name to log
 STOP_HAZARDS = {
@@ -129,6 +131,7 @@ class ConeDriver(Node):
         self._yaw = None            # rad, odom frame, counter-clockwise positive
         self._yaw_time = None
         self._origin = None         # (x, y) m, odom frame, captured before Task 1
+        self._approach_path = []    # odometry points recorded while approaching the cone
         self._hazard = None         # name of the latest bump or cliff
         self._hazard_time = None
 
@@ -410,78 +413,138 @@ class ConeDriver(Node):
         finally:
             self.stop()
 
+    def _record_approach_position(self, force=False):
+        """Save the current odometry position when far enough from the last path point."""
+        if not self._approach_path:
+            self._approach_path.append((self._x, self._y))
+            return
+        last_x, last_y = self._approach_path[-1]
+        distance = math.hypot(self._x - last_x, self._y - last_y)
+        if distance >= RETURN_PATH_SAMPLE or (force and distance > 0.01):
+            self._approach_path.append((self._x, self._y))
+
     def drive_to_cone(self, color, sighting):
-        """Center the selected cone and drive slowly until the LiDAR reaches stop range."""
+        """Drive 1 m by odometry, realign once, then approach to the LiDAR stop range."""
         self.get_logger().info(f'Task 2: approaching {color}; target gap about 1 inch')
         self._turn_to(sighting.yaw)
         deadline = self._now() + 60.0
-        last_image_time = None
+        start_x, start_y = self._x, self._y
+        self._approach_path = [(start_x, start_y)]
         try:
+            # Drive the first meter along the remembered cone heading. Odometry holds
+            # that heading; the camera is used for the planned realignment at 1 m.
             while self._now() <= deadline:
-                image = self._fresh_image()
-                blob = find_blob(image, self._hsv[color], self._min_area)
-                if blob is None:
-                    # Do not advance blindly if the target is outside the camera view.
-                    self._step(0.0, TASK2_TURN_SPEED)
-                    continue
-                center = (image.shape[1] - 1) / 2.0
-                error = (blob.u - center) / max(1.0, center)
-                if abs(error) > self._center_tolerance:
-                    self._step(0.0, max(-TASK2_TURN_SPEED,
-                                        min(TASK2_TURN_SPEED, -error * TASK2_TURN_SPEED)))
-                    last_image_time = self._image_time
-                    continue
                 front = self._fresh_front()
                 if front <= self._stop_range:
+                    self._record_approach_position(force=True)
                     self.get_logger().info(
                         f'Reached {color}: front range {front:.2f} m (stop threshold '
                         f'{self._stop_range:.2f} m)')
                     return
                 if not math.isfinite(front):
                     raise Abort('no valid LiDAR range ahead; refusing to drive')
-                self._step(TASK2_LINEAR_SPEED, 0.0)
-                # Require a new camera frame before making the next movement decision.
-                if self._image_time is last_image_time:
-                    time.sleep(CONTROL_PERIOD)
-                last_image_time = self._image_time
+                distance = math.hypot(self._x - start_x, self._y - start_y)
+                if distance >= TASK2_ALIGNMENT_DISTANCE:
+                    break
+                heading_error = wrap_angle(sighting.yaw - self._fresh_yaw())
+                angular = max(-0.15, min(0.15, heading_error * 1.5))
+                self._step(TASK2_LINEAR_SPEED, angular)
+                self._record_approach_position()
+            else:
+                raise Abort(f'timed out driving the first {TASK2_ALIGNMENT_DISTANCE:.1f} m')
+
+            self.stop()
+            self.get_logger().info(
+                f'Drove {TASK2_ALIGNMENT_DISTANCE:.1f} m by odometry; realigning with camera')
+            # Stop and use the camera to center the cone once. If the cone is not yet
+            # visible, rotate slowly until it appears; abort rather than drive blind.
+            align_deadline = min(deadline, self._now() + 20.0)
+            while self._now() <= align_deadline:
+                image = self._fresh_image()
+                blob = find_blob(image, self._hsv[color], self._min_area)
+                if blob is None:
+                    self._step(0.0, TASK2_TURN_SPEED)
+                    continue
+                center = (image.shape[1] - 1) / 2.0
+                error = (blob.u - center) / max(1.0, center)
+                if abs(error) <= self._center_tolerance:
+                    break
+                angular = max(-TASK2_TURN_SPEED,
+                              min(TASK2_TURN_SPEED, -error * TASK2_TURN_SPEED))
+                self._step(0.0, angular)
+            else:
+                raise Abort(f'timed out realigning with {color}')
+            self.stop()
+
+            # After this one camera correction, keep the corrected odometry heading
+            # and use LiDAR for the stopping decision.
+            approach_yaw = self._fresh_yaw()
+            while self._now() <= deadline:
+                front = self._fresh_front()
+                if front <= self._stop_range:
+                    self._record_approach_position(force=True)
+                    self.get_logger().info(
+                        f'Reached {color}: front range {front:.2f} m (stop threshold '
+                        f'{self._stop_range:.2f} m)')
+                    return
+                if not math.isfinite(front):
+                    raise Abort('no valid LiDAR range ahead; refusing to drive')
+                heading_error = wrap_angle(approach_yaw - self._fresh_yaw())
+                angular = max(-0.15, min(0.15, heading_error * 1.5))
+                self._step(TASK2_LINEAR_SPEED, angular)
+                self._record_approach_position()
             raise Abort(f'timed out approaching {color}')
         finally:
             self.stop()
 
     def return_to_origin(self):
-        """Drive back to the odometry position recorded before Task 1."""
+        """Follow the recorded approach path in reverse back to the starting position."""
         if self._origin is None:
             raise Abort('starting position was not recorded')
-        goal_x, goal_y = self._origin
-        self.get_logger().info('Returning to the starting position before the next cone')
+        self._record_approach_position(force=True)
+        path = list(self._approach_path)
+        if len(path) < 2:
+            distance = math.hypot(self._origin[0] - self._x, self._origin[1] - self._y)
+            if distance <= 0.08:
+                self.get_logger().info('Back at the starting position')
+                return
+            path = [self._origin, (self._x, self._y)]
+        # The route should finish at the position captured before the initial scan.
+        path[0] = self._origin
+        waypoint = len(path) - 2
+        self.get_logger().info('Following the recorded path back to the starting position')
         deadline = self._now() + 60.0
         try:
-            while self._now() <= deadline:
+            # Turn around once to face the last recorded part of the outbound path.
+            first_x, first_y = path[waypoint]
+            bearing = math.atan2(first_y - self._y, first_x - self._x)
+            self._turn_to(bearing)
+            while self._now() <= deadline and waypoint >= 0:
                 self._fresh_yaw()
-                dx = goal_x - self._x
-                dy = goal_y - self._y
+                target_x, target_y = path[waypoint]
+                dx = target_x - self._x
+                dy = target_y - self._y
                 distance = math.hypot(dx, dy)
                 if distance <= 0.08:
-                    self.get_logger().info('Back at the starting position')
-                    return
-
-                # Recompute the bearing as the robot moves so odometry drift does not
-                # accumulate into a fixed open-loop return heading.
-                bearing = math.atan2(dy, dx)
-                heading_error = wrap_angle(bearing - self._yaw)
-                if abs(heading_error) > math.radians(5.0):
-                    angular = max(-TASK2_TURN_SPEED,
-                                  min(TASK2_TURN_SPEED, heading_error))
-                    self._step(0.0, angular)
+                    waypoint -= 1
                     continue
-
                 front = self._fresh_front()
                 if not math.isfinite(front) or front < 0.25:
                     raise Abort('blocked or invalid LiDAR range on the return path')
+                bearing = math.atan2(dy, dx)
+                heading_error = wrap_angle(bearing - self._yaw)
+                # Keep moving between recorded points; slow down and steer more on
+                # bends instead of stopping to turn at every waypoint.
                 speed = min(TASK2_LINEAR_SPEED, max(0.03, distance * 0.5))
-                angular = max(-0.15, min(0.15, heading_error * 1.5))
+                if abs(heading_error) > math.radians(35.0):
+                    speed = min(speed, 0.04)
+                angular = max(-TASK2_TURN_SPEED,
+                              min(TASK2_TURN_SPEED, heading_error * 1.5))
                 self._step(speed, angular)
-            raise Abort('timed out returning to the starting position')
+            if waypoint < 0:
+                self.get_logger().info('Back at the starting position')
+                return
+            raise Abort('timed out returning along the recorded path')
         finally:
             self.stop()
 
