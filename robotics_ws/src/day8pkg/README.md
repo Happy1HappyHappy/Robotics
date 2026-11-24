@@ -58,20 +58,29 @@ no `lab_dock.yaml` here. You do not need to undock by hand or use `query_dock.ba
    colcon build --packages-select day8pkg
    ```
 
-   The build must end with `Summary: 1 package finished`.
+   The build must end with `Summary: 1 package finished`. If T1 or T2 was already open, run
+   step 2.1 in it again afterwards, so that it finds the new build.
 
 ### 2. Set up both terminals (every time)
 
-1. Open T1 and T2. In **each** one, run:
+1. Open T1 and T2. In **each** one, run this exact line (the file is in
+   `robotics_ws/src/day8pkg/scripts`, not in `~/Robotics`):
 
    ```bash
    source ~/Robotics/robotics_ws/src/day8pkg/scripts/sim_env.bash
    ```
 
-   It prints `Simulator settings: ROS_DOMAIN_ID=73`. It switches off the real robot's discovery
-   server (which your `.bashrc` may set), and its `ROS_DOMAIN_ID` keeps other people's simulators
-   and robots out. Without it, the simulator's own nodes may not find each other, and the robot
-   never appears.
+   It must print `Simulator settings: ROS_DOMAIN_ID=73`. If it prints `No such file or directory`
+   instead, nothing was set: fix the path and run it again. It switches off the real robot's
+   discovery server (which your `.bashrc` may set), puts the terminal on the simulator's ROS
+   network, and loads the built `day8pkg`. A terminal without it can neither see the simulator
+   nor find `day8pkg`.
+
+   To check a terminal at any time (it must print `73` in T1 and in T2):
+
+   ```bash
+   printenv ROS_DOMAIN_ID
+   ```
 2. In T1, stop anything left from an earlier run. Do this before **every** start: a second run
    that collides with leftovers from the first one fails (no map, `Waiting for service ...`
    forever, a slow Gazebo). It stops every ROS 2 program on this computer, restarts the ROS
@@ -112,13 +121,17 @@ bash ~/Robotics/robotics_ws/src/day8pkg/scripts/activate_nav.bash
 
 ### 5. Start create_path (T2)
 
+First check that T2 is on the simulator's ROS network: `printenv ROS_DOMAIN_ID` must print `73`.
+If it does not, run step 2.1 in T2. Then:
+
 ```bash
 cd ~/Robotics/robotics_ws
 ros2 run day8pkg create_path
 ```
 
 It prints `Click poses with "2D Pose Estimate" in RViz, then press Enter here.` Wait about 10 s
-before clicking, so that it is connected to RViz.
+before clicking, so that it is connected to RViz. If a click in step 6 prints nothing in T2, see
+[the table below](#if-something-goes-wrong-in-the-simulator).
 
 ### 6. Click the path and run it
 
@@ -147,9 +160,10 @@ start over at any point, do the same and go back to [step 3](#3-start-the-simula
 | `Package 'turtlebot4_gz_bringup' not found` | The simulator is not installed | [Step 1](#1-prepare-the-computer-once-per-computer) |
 | The robot appears, but there are no red LiDAR points and no costmaps | No GPU (the simulated LiDAR needs one), or the pose is not set | Use a computer with a GPU; set the pose ([step 4](#4-set-the-start-pose-rviz)) |
 | No costmaps a minute after setting the pose | Nav2 is half-started | Run `activate_nav.bash` ([step 4](#4-set-the-start-pose-rviz)) |
-| Clicking with 2D Pose Estimate prints nothing in T2 | T2 lacks the simulator settings, or `create_path` had just started | Ctrl-C in T2, `source` `sim_env.bash` again, restart `create_path`, wait 10 s. `ros2 topic info /initialpose -v` must list `basic_navigator` under the subscriptions |
+| `bash: .../sim_env.bash: No such file or directory` | The path is wrong (for example `~/Robotics/sim_env.bash`), so nothing was set | Use the exact line from [step 2.1](#2-set-up-both-terminals-every-time) |
+| Clicking with 2D Pose Estimate prints nothing in T2 | T2 is not on the simulator's ROS network (`printenv ROS_DOMAIN_ID` does not print `73`), or `create_path` had just started | Ctrl-C in T2, run [step 2.1](#2-set-up-both-terminals-every-time) in T2, restart `create_path`, wait 10 s. `ros2 topic info /initialpose -v` must list `basic_navigator` under the subscriptions |
 | T2 keeps printing `... is inactive, waiting...` | Nav2 is half-started | Run `activate_nav.bash` in a third terminal (after `source`-ing `sim_env.bash`). **The robot starts driving as soon as it succeeds** |
-| `ros2 run day8pkg create_path` is not found, or `sim_env.bash` says `not built yet` | `day8pkg` is not built | Build it ([step 1](#1-prepare-the-computer-once-per-computer)), then `source` `sim_env.bash` again |
+| `Package 'day8pkg' not found`, or `sim_env.bash` says `not built yet` | `day8pkg` is not built, or this terminal ran `sim_env.bash` before the build (or not at all) | Build it ([step 1](#1-prepare-the-computer-once-per-computer)), then run [step 2.1](#2-set-up-both-terminals-every-time) in this terminal again. Sourcing only `install/setup.bash` finds `day8pkg` but leaves the terminal off the simulator's ROS network |
 | Gazebo or RViz show a second robot, or nodes appear twice in `ros2 node list` | Another simulator or robot on the same network uses the same `ROS_DOMAIN_ID` | Change `ROS_DOMAIN_ID` in `sim_env.bash` to another number from 1 to 101, `source` it again in every terminal, and run `sim_reset.bash` |
 
 ## Extra credit: the real robot
