@@ -1,7 +1,8 @@
 # cs5335_cones: plan
 
 Project 9: turn 360 degrees and name the 3 colored cones, then, in a loop, drive to the cone
-the user names and stop about an inch from it without touching it.
+the user names, stop about an inch from it without touching it, and return to the starting
+position before asking for the next color.
 
 ## Idea
 
@@ -22,8 +23,9 @@ the user names and stop about an inch from it without touching it.
 1. Ask for a color.
 2. Turn to the saved yaw (odometry).
 3. Turn until the blob is in the middle of the image (camera, `center_tolerance` px).
-4. Drive straight. Speed is proportional to (front range - `stop_range`). Stop when the
-   LiDAR's front range is at or below `stop_range`.
+4. Drive slowly while keeping the cone centered. Stop when the LiDAR's front range is at or
+   below `stop_range`.
+5. Return to the odometry position recorded before Task 1, then ask for the next color.
 
 ## Files
 
@@ -63,9 +65,19 @@ window thread.
 
 ## Check on the robot
 
+Before each run, from `robotics_ws`, check that every topic works:
+
+```bash
+bash src/cs5335_cones/scripts/check_topics.bash --move
+```
+
+It checks that the camera, LiDAR, odometry and hazard topics have a publisher and (except
+hazards) that their messages arrive, that `cmd_vel` is `TwistStamped` with a subscriber, and,
+with `--move`, that the robot turns about 17 degrees when told to. Without `--move` the robot
+does not move.
+
 | What | How |
 | --- | --- |
-| Camera topic and image size | `ros2 topic hz /oakd/rgb/preview/image_raw` |
+| Every topic works | `scripts/check_topics.bash` (above) |
 | Which way the LiDAR's 0 angle points (`lidar_yaw`) | `ros2 run tf2_ros tf2_echo base_link rplidar_link` |
-| `cmd_vel` type | `ros2 topic info -v /cmd_vel` |
 | `stop_range` | Set the robot 1 inch from a cone's base and read the front range |

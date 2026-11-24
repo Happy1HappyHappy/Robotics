@@ -19,3 +19,8 @@ cone_driver:
     # rad, how far the LiDAR is turned on the robot (counter-clockwise). Check with:
     #   ros2 run tf2_ros tf2_echo base_link rplidar_link
     lidar_yaw: 1.5708
+
+    # Task 2: approach slowly and stop before the cone. Tune stop_range in the lab so
+    # the robot's front edge ends about 1 inch from the cone.
+    stop_range: 0.20          # m, measured from the LiDAR
+    center_tolerance: 0.06    # fraction of image half-width

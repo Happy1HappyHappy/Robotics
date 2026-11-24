@@ -16,7 +16,8 @@
 Cone driver node for Project 9.
 
 Task 1: turn 360 degrees in place, find each colored cone in the camera image as the
-robot turns, and log each cone's color, direction and distance. Task 2 is added later.
+robot turns, and log each cone's color, direction and distance. Task 2 lets the user
+choose a cone and drives toward it using the camera and LiDAR.
 
 The callbacks only store the latest data. Task 1 runs in the main thread and reads it,
 while the executor spins in a background thread.
@@ -47,6 +48,8 @@ CONTROL_PERIOD = 0.05           # s, one velocity command every 50 ms (20 Hz)
 HAZARD_HOLD = 1.0               # s, a bump or cliff this recent stops the robot
 MAX_LINEAR_SPEED = 0.15         # m/s (the TurtleBot 4 can do 0.31)
 MAX_ANGULAR_SPEED = 0.8         # rad/s (the TurtleBot 4 can do 1.9)
+TASK2_LINEAR_SPEED = 0.08       # m/s, keep the approach slow
+TASK2_TURN_SPEED = 0.25         # rad/s, slow alignment and heading turns
 
 # Hazards that stop the robot, with the name to log
 STOP_HAZARDS = {
@@ -103,6 +106,14 @@ class ConeDriver(Node):
             'Half the width of the LiDAR window straight ahead (rad)', 0.01, 0.5)
         self._data_timeout = self._declare(
             'data_timeout', 0.5, 'Stop if odometry is older than this (s)', 0.1, 5.0)
+        self._stop_range = self._declare(
+            'stop_range', 0.20,
+            'LiDAR range at which to stop before the cone (m); tune to leave about 1 inch',
+            0.15, 0.35)
+        self._center_tolerance = self._declare(
+            'center_tolerance', 0.06,
+            'Allow this fraction of the image half-width from center before driving',
+            0.01, 0.25)
 
         self._bridge = CvBridge()
 
@@ -113,8 +124,11 @@ class ConeDriver(Node):
         self._image_time = None
         self._front = None          # m, nearest LiDAR range straight ahead (math.inf: none)
         self._front_time = None
+        self._x = None               # m, odom frame
+        self._y = None               # m, odom frame
         self._yaw = None            # rad, odom frame, counter-clockwise positive
         self._yaw_time = None
+        self._origin = None         # (x, y) m, odom frame, captured before Task 1
         self._hazard = None         # name of the latest bump or cliff
         self._hazard_time = None
 
@@ -162,7 +176,9 @@ class ConeDriver(Node):
         self._front_time = self.get_clock().now()
 
     def _odom_callback(self, msg):
-        """Store the robot's latest yaw from odometry."""
+        """Store the robot's latest planar position and yaw from odometry."""
+        self._x = msg.pose.pose.position.x
+        self._y = msg.pose.pose.position.y
         self._yaw = yaw_from_quaternion(msg.pose.pose.orientation)
         self._yaw_time = self.get_clock().now()
 
@@ -232,6 +248,13 @@ class ConeDriver(Node):
         if age is None or age > self._data_timeout:
             return math.inf
         return self._front
+
+    def _fresh_image(self):
+        """Return the latest camera image; raise Abort if it is missing or stale."""
+        age = self._age(self._image_time)
+        if age is None or age > self._data_timeout:
+            raise Abort('camera image stopped arriving')
+        return self._image
 
     def _publish(self, linear, angular):
         """Publish a velocity command (m/s forward, rad/s left), clamped to the limits."""
@@ -348,16 +371,141 @@ class ConeDriver(Node):
             distance = f'{s.distance:.2f} m' if math.isfinite(s.distance) else 'no LiDAR reading'
             self.get_logger().info(f'  {color:<8} {direction:+5.0f} deg  {distance}')
 
+    # ---------- Task 2 ----------
+
+    def _turn_to(self, target_yaw):
+        """Turn in place toward a cone's remembered odometry heading."""
+        deadline = self._now() + 30.0
+        try:
+            while True:
+                error = wrap_angle(target_yaw - self._fresh_yaw())
+                if abs(error) < math.radians(3.0):
+                    return
+                if self._now() > deadline:
+                    raise Abort('timed out turning toward the cone')
+                angular = math.copysign(min(TASK2_TURN_SPEED, max(0.10, abs(error))), error)
+                self._step(0.0, angular)
+        finally:
+            self.stop()
+
+    def drive_to_cone(self, color, sighting):
+        """Center the selected cone and drive slowly until the LiDAR reaches stop range."""
+        self.get_logger().info(f'Task 2: approaching {color}; target gap about 1 inch')
+        self._turn_to(sighting.yaw)
+        deadline = self._now() + 60.0
+        last_image_time = None
+        try:
+            while self._now() <= deadline:
+                image = self._fresh_image()
+                blob = find_blob(image, self._hsv[color], self._min_area)
+                if blob is None:
+                    # Do not advance blindly if the target is outside the camera view.
+                    self._step(0.0, TASK2_TURN_SPEED)
+                    continue
+                center = (image.shape[1] - 1) / 2.0
+                error = (blob.u - center) / max(1.0, center)
+                if abs(error) > self._center_tolerance:
+                    self._step(0.0, max(-TASK2_TURN_SPEED,
+                                        min(TASK2_TURN_SPEED, -error * TASK2_TURN_SPEED)))
+                    last_image_time = self._image_time
+                    continue
+                front = self._fresh_front()
+                if front <= self._stop_range:
+                    self.get_logger().info(
+                        f'Reached {color}: front range {front:.2f} m (stop threshold '
+                        f'{self._stop_range:.2f} m)')
+                    return
+                if not math.isfinite(front):
+                    raise Abort('no valid LiDAR range ahead; refusing to drive')
+                self._step(TASK2_LINEAR_SPEED, 0.0)
+                # Require a new camera frame before making the next movement decision.
+                if self._image_time is last_image_time:
+                    time.sleep(CONTROL_PERIOD)
+                last_image_time = self._image_time
+            raise Abort(f'timed out approaching {color}')
+        finally:
+            self.stop()
+
+    def return_to_origin(self):
+        """Drive back to the odometry position recorded before Task 1."""
+        if self._origin is None:
+            raise Abort('starting position was not recorded')
+        goal_x, goal_y = self._origin
+        self.get_logger().info('Returning to the starting position before the next cone')
+        deadline = self._now() + 60.0
+        try:
+            while self._now() <= deadline:
+                self._fresh_yaw()
+                dx = goal_x - self._x
+                dy = goal_y - self._y
+                distance = math.hypot(dx, dy)
+                if distance <= 0.08:
+                    self.get_logger().info('Back at the starting position')
+                    return
+
+                # Recompute the bearing as the robot moves so odometry drift does not
+                # accumulate into a fixed open-loop return heading.
+                bearing = math.atan2(dy, dx)
+                heading_error = wrap_angle(bearing - self._yaw)
+                if abs(heading_error) > math.radians(5.0):
+                    angular = max(-TASK2_TURN_SPEED,
+                                  min(TASK2_TURN_SPEED, heading_error))
+                    self._step(0.0, angular)
+                    continue
+
+                front = self._fresh_front()
+                if not math.isfinite(front) or front < 0.25:
+                    raise Abort('blocked or invalid LiDAR range on the return path')
+                speed = min(TASK2_LINEAR_SPEED, max(0.03, distance * 0.5))
+                angular = max(-0.15, min(0.15, heading_error * 1.5))
+                self._step(speed, angular)
+            raise Abort('timed out returning to the starting position')
+        finally:
+            self.stop()
+
+    def choose_and_approach(self, sightings):
+        """Ask for cone colors repeatedly; q exits the selection loop."""
+        while True:
+            try:
+                choice = input(f'Choose a cone color ({", ".join(self._colors)}) or q to quit: ')
+            except EOFError:
+                return
+            color = choice.strip().lower()
+            if color in ('q', 'quit', 'exit'):
+                self.get_logger().info('Leaving Task 2')
+                return
+            if color not in self._colors:
+                self.get_logger().warn(f'Unknown color {color!r}; choose from {self._colors}')
+                continue
+            sighting = sightings.get(color)
+            if sighting is None:
+                self.get_logger().warn(f'{color} was not detected during Task 1')
+                continue
+            try:
+                self.drive_to_cone(color, sighting)
+            except Abort as e:
+                self.get_logger().error(f'Approach stopped: {e}')
+                return
+            try:
+                self.return_to_origin()
+            except Abort as e:
+                self.get_logger().error(f'Return stopped: {e}; not asking for another cone')
+                return
+
     def run(self):
-        """Wait for the robot's data, then do Task 1."""
+        """Wait for the robot's data, then run both tasks."""
         if not self._wait_for_data():
             return
+        self._origin = (self._x, self._y)
+        self.get_logger().info(f'Starting position recorded: x={self._x:.2f} m, '
+                               f'y={self._y:.2f} m (odom)')
         try:
             sightings = self.find_cones()
         except Abort as e:
             self.get_logger().error(f'Task 1 stopped: {e}')
             return
         self._report(sightings)
+        self.choose_and_approach(sightings)
 
 
 def main(args=None):
