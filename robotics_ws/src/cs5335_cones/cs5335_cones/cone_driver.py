@@ -44,7 +44,7 @@ from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import Image, LaserScan
 
 FULL_TURN = 2.0 * math.pi       # rad
-CONTROL_PERIOD = 0.05           # s, one velocity command every 50 ms (20 Hz)
+CONTROL_PERIOD = 0.02           # s, one velocity command every 20 ms (50 Hz)
 HAZARD_HOLD = 1.0               # s, a bump or cliff this recent stops the robot
 MAX_LINEAR_SPEED = 0.15         # m/s (the TurtleBot 4 can do 0.31)
 MAX_ANGULAR_SPEED = 0.8         # rad/s (the TurtleBot 4 can do 1.9)
@@ -138,8 +138,15 @@ class ConeDriver(Node):
         self._cmd_linear = None
         self._cmd_angular = None
         self._cmd_time = None
+        self._target_linear = 0.0
+        self._target_angular = 0.0
+        self._motion_active = False
+        self._command_lock = threading.Lock()
 
         self._cmd_pub = self.create_publisher(TwistStamped, 'cmd_vel', 10)
+        # While moving, keep the latest velocity setpoint flowing at a steady rate
+        # while the main thread processes camera images between control decisions.
+        self._command_timer = self.create_timer(CONTROL_PERIOD, self._repeat_command)
         self.create_subscription(Image, 'oakd/rgb/preview/image_raw',
                                  self._image_callback, qos_profile_sensor_data)
         self.create_subscription(LaserScan, 'scan',
@@ -258,16 +265,26 @@ class ConeDriver(Node):
 
     def _publish(self, linear, angular):
         """Publish a velocity command (m/s forward, rad/s left), clamped to the limits."""
+        self._target_linear = max(-MAX_LINEAR_SPEED,
+                                  min(MAX_LINEAR_SPEED, float(linear)))
+        self._target_angular = max(-MAX_ANGULAR_SPEED,
+                                   min(MAX_ANGULAR_SPEED, float(angular)))
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'base_link'
-        msg.twist.linear.x = max(-MAX_LINEAR_SPEED, min(MAX_LINEAR_SPEED, float(linear)))
-        msg.twist.angular.z = max(-MAX_ANGULAR_SPEED, min(MAX_ANGULAR_SPEED, float(angular)))
+        msg.twist.linear.x = self._target_linear
+        msg.twist.angular.z = self._target_angular
         self._cmd_pub.publish(msg)
         self._cmd_count += 1
         self._cmd_linear = msg.twist.linear.x
         self._cmd_angular = msg.twist.angular.z
         self._cmd_time = self.get_clock().now()
+
+    def _repeat_command(self):
+        """Keep active motion alive; stay quiet while stopped or awaiting user input."""
+        with self._command_lock:
+            if self._motion_active:
+                self._publish(self._target_linear, self._target_angular)
 
     def _step(self, linear, angular):
         """
@@ -280,12 +297,17 @@ class ConeDriver(Node):
         if age is not None and age < HAZARD_HOLD:
             raise Abort(f'{self._hazard} detected')
         self._fresh_yaw()
-        self._publish(linear, angular)
+        with self._command_lock:
+            self._motion_active = True
+            self._publish(linear, angular)
         time.sleep(CONTROL_PERIOD)
 
     def stop(self):
         """Stop the robot: send a zero velocity a few times, in case one is lost."""
-        for _ in range(3):
+        with self._command_lock:
+            self._motion_active = False
+            self._publish(0.0, 0.0)
+        for _ in range(2):
             self._publish(0.0, 0.0)
             time.sleep(0.02)
 
