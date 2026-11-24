@@ -68,9 +68,10 @@ no `lab_dock.yaml` here. You do not need to undock by hand or use `query_dock.ba
    source ~/Robotics/robotics_ws/src/day8pkg/scripts/sim_env.bash
    ```
 
-   It prints `Simulator settings: ROS_DOMAIN_ID=8, this computer only`. It switches off the real
-   robot's discovery server (which your `.bashrc` may set) and keeps ROS to this computer. Without
-   it, the simulator's own nodes may not find each other, and the robot never appears.
+   It prints `Simulator settings: ROS_DOMAIN_ID=73`. It switches off the real robot's discovery
+   server (which your `.bashrc` may set), and its `ROS_DOMAIN_ID` keeps other people's simulators
+   and robots out. Without it, the simulator's own nodes may not find each other, and the robot
+   never appears.
 2. In T1, stop anything left from an earlier run. Do this before **every** start: a second run
    that collides with leftovers from the first one fails (no map, `Waiting for service ...`
    forever, a slow Gazebo). It stops every ROS 2 program on this computer, restarts the ROS
@@ -149,7 +150,7 @@ start over at any point, do the same and go back to [step 3](#3-start-the-simula
 | Clicking with 2D Pose Estimate prints nothing in T2 | T2 lacks the simulator settings, or `create_path` had just started | Ctrl-C in T2, `source` `sim_env.bash` again, restart `create_path`, wait 10 s. `ros2 topic info /initialpose -v` must list `basic_navigator` under the subscriptions |
 | T2 keeps printing `... is inactive, waiting...` | Nav2 is half-started | Run `activate_nav.bash` in a third terminal (after `source`-ing `sim_env.bash`). **The robot starts driving as soon as it succeeds** |
 | `ros2 run day8pkg create_path` is not found, or `sim_env.bash` says `not built yet` | `day8pkg` is not built | Build it ([step 1](#1-prepare-the-computer-once-per-computer)), then `source` `sim_env.bash` again |
-| Gazebo or RViz show a second robot, or nodes appear twice in `ros2 node list` | Another simulator on the same network and `ROS_DOMAIN_ID` | `sim_env.bash` keeps ROS to this computer; check it is sourced in every terminal |
+| Gazebo or RViz show a second robot, or nodes appear twice in `ros2 node list` | Another simulator or robot on the same network uses the same `ROS_DOMAIN_ID` | Change `ROS_DOMAIN_ID` in `sim_env.bash` to another number from 1 to 101, `source` it again in every terminal, and run `sim_reset.bash` |
 
 ## Extra credit: the real robot
 
