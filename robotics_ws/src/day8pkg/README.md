@@ -136,15 +136,19 @@ bash ~/Robotics/robotics_ws/src/day8pkg/scripts/activate_nav.bash
 
    The first must print `Set parameter successful`, the second `Boolean value is: False`. This
    is only for the simulator; on the real robot, keep it on.
-3. Start `create_path`:
+3. Build `day8pkg` and start `create_path`. The build takes a few seconds and makes sure T2 runs
+   the latest code:
 
    ```bash
    cd ~/Robotics/robotics_ws
+   colcon build --packages-select day8pkg
+   source install/setup.bash
    ros2 run day8pkg create_path
    ```
 
-   It prints `Click poses with "2D Pose Estimate" in RViz, then press Enter here.` Wait about
-   10 s before clicking, so that it is connected to RViz.
+   The build must end with `Summary: 1 package finished`. Then `create_path` prints
+   `Click poses with "2D Pose Estimate" in RViz, then press Enter here.` Wait about 10 s before
+   clicking, so that it is connected to RViz.
 
 ### 6. Click the path and run it
 
@@ -235,7 +239,7 @@ the next moment. So it can stop the robot while RViz looks empty. Its line in th
 | `bash: .../sim_env.bash: No such file or directory` | The path is wrong (for example `~/Robotics/sim_env.bash`), so nothing was set | Use the exact line from [step 2.1](#2-set-up-both-terminals-every-time) |
 | Clicking with 2D Pose Estimate prints nothing in T2 | T2 is not on the simulator's ROS network (`printenv ROS_DOMAIN_ID` does not print `73`), or `create_path` had just started | Ctrl-C in T2, run [step 2.1](#2-set-up-both-terminals-every-time) in T2, restart `create_path`, wait 10 s. `ros2 topic info /initialpose -v` must list `basic_navigator` under the subscriptions |
 | T2 keeps printing `Waiting for AMCL to report a pose...` or `... is inactive, waiting...` | Localization or Nav2 is half-started | Run `activate_nav.bash` in a third terminal (after step 2.1 there). **The robot starts driving as soon as it succeeds** |
-| `Package 'day8pkg' not found`, or `sim_env.bash` says `not built yet` | `day8pkg` is not built, or this terminal ran `sim_env.bash` before the build (or not at all) | Build it ([step 1](#1-prepare-the-computer-once-per-computer)), then run [step 2.1](#2-set-up-both-terminals-every-time) in this terminal again |
+| `Package 'day8pkg' not found`, or `sim_env.bash` says `not built yet` | `day8pkg` is not built, or this terminal ran `sim_env.bash` before the build (or not at all) | Run [step 2.1](#2-set-up-both-terminals-every-time) in this terminal, then [step 5.3](#5-start-create_path-t2), which builds and loads `day8pkg` |
 | Gazebo or RViz show a second robot, or nodes appear twice in `ros2 node list` | Another simulator or robot on the same network uses the same `ROS_DOMAIN_ID` | Change `ROS_DOMAIN_ID` in `sim_env.bash` to another number from 1 to 101, run step 2.1 again in every terminal, and start over |
 | A `ros2` command hangs with no output | Its answer got lost | Ctrl-C and run it again; put `timeout -k 3 10` in front of it |
 
