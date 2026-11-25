@@ -122,16 +122,29 @@ bash ~/Robotics/robotics_ws/src/day8pkg/scripts/activate_nav.bash
 
 ### 5. Start create_path (T2)
 
-First check that T2 is on the simulator's ROS network: `printenv ROS_DOMAIN_ID` must print `73`.
-If it does not, run step 2.1 in T2. Then:
+1. Check that T2 is on the simulator's ROS network: `printenv ROS_DOMAIN_ID` must print `73`. If
+   it does not, run step 2.1 in T2.
+2. Turn off the collision monitor's approach check. In this simulator it sees something inside
+   the robot's outline and stops every move, so the robot undocks and then stays where it is
+   while T1 keeps printing `Robot to approach for 1.200000 seconds away from collision`. Do this
+   after **every** start of the simulator, since a restart turns it on again:
 
-```bash
-cd ~/Robotics/robotics_ws
-ros2 run day8pkg create_path
-```
+   ```bash
+   ros2 param set /collision_monitor FootprintApproach.enabled false
+   ros2 param get /collision_monitor FootprintApproach.enabled
+   ```
 
-It prints `Click poses with "2D Pose Estimate" in RViz, then press Enter here.` Wait about 10 s
-before clicking, so that it is connected to RViz.
+   The first must print `Set parameter successful`, the second `Boolean value is: False`. This
+   is only for the simulator; on the real robot, keep it on.
+3. Start `create_path`:
+
+   ```bash
+   cd ~/Robotics/robotics_ws
+   ros2 run day8pkg create_path
+   ```
+
+   It prints `Click poses with "2D Pose Estimate" in RViz, then press Enter here.` Wait about
+   10 s before clicking, so that it is connected to RViz.
 
 ### 6. Click the path and run it
 
@@ -163,7 +176,7 @@ start over at any point, do the same and go back to [step 3](#3-start-the-simula
   `slam_toolbox` noise:
 
   ```bash
-  grep -v slam_toolbox ~/sim.log | grep -E "Robot to stop|Failed|No valid|lethal|died|ERROR" | tail -30
+  grep -v slam_toolbox ~/sim.log | grep -E "Robot to stop|Robot to approach|Failed|No valid|lethal|died|ERROR" | tail -30
   ```
 
   If T1 was started without `tee`, search T1 itself: click the magnifier in its title bar (or
@@ -195,20 +208,20 @@ The first one that prints nothing (or only zeros) is where the command stops:
 | -------------- | ------------------- | ---------- | -------------- | ---------- |
 | nothing or 0 | | | The controller computes no motion: usually a point is in or next to an obstacle | Ctrl-C in T2, start `create_path` again and click the points in open space ([step 6](#6-click-the-path-and-run-it)). The log says `Failed to create plan`, `lethal` or `Failed to make progress` |
 | moves | nothing | | The velocity smoother is not running | `bash ~/Robotics/robotics_ws/src/day8pkg/scripts/activate_nav.bash` |
-| moves | moves | nothing | **The collision monitor stops the robot**. When it stops, it sends 0 once and then nothing | Find out why in the log: `grep -n "Robot to stop" ~/sim.log` (see below) |
+| moves | moves | nothing | **The collision monitor stops the robot**. When it stops, it sends 0 once and then nothing | Find out why in the log: `grep -n -E "Robot to (stop\|approach)" ~/sim.log` (see below) |
 | moves | moves | moves | The command reaches `/cmd_vel`, but Gazebo does not take it | `ros2 topic info /cmd_vel -v` must show a subscription (the simulator). If not, start over ([step 7](#7-stop-or-start-over)) |
 
 `angular: z: 1.0` with all `linear` values 0 is Nav2's recovery: it tries to turn in place.
 
 Why the collision monitor stops the robot: it does not use the map or the costmaps in RViz. It
 takes the raw LiDAR points and predicts whether the robot's outline would touch any of them in
-the next moment. So it can stop the robot while RViz looks empty. The `Robot to stop due to ...`
-line in the log says why:
+the next moment. So it can stop the robot while RViz looks empty. Its line in the log says why:
 
-| `Robot to stop due to ...` | Meaning | What to do |
-| -------------------------- | ------- | ---------- |
-| a polygon name, for example `FootprintApproach` | LiDAR points are right at the robot, for example the dock it just left | Start over ([step 7](#7-stop-or-start-over)); if it happens every time, add a LaserScan display in RViz to see which points are at the robot |
-| `invalid source` | It has no usable LiDAR data: none yet, too old, or not in the robot's frame | Check Gazebo is not paused and its real-time factor (bottom right, %) is not very low; check the LiDAR with `timeout -k 3 10 ros2 topic hz /scan`; start over |
+| Log line | Meaning | What to do |
+| -------- | ------- | ---------- |
+| `Robot to approach for 1.200000 seconds away from collision`, again each time Nav2 tries to move | It predicts a collision within 1.2 s for every move and slows the robot to 0. This simulator does this all the time | Turn off the approach check ([step 5.2](#5-start-create_path-t2)) |
+| `Robot to stop due to` a polygon name | LiDAR points are right at the robot, for example the dock it just left | Start over ([step 7](#7-stop-or-start-over)); if it happens every time, add a LaserScan display in RViz to see which points are at the robot |
+| `Robot to stop due to invalid source` | It has no usable LiDAR data: none yet, too old, or not in the robot's frame | Check Gazebo is not paused and its real-time factor (bottom right, %) is not very low; check the LiDAR with `timeout -k 3 10 ros2 topic hz /scan`; start over |
 
 ### Other problems
 
