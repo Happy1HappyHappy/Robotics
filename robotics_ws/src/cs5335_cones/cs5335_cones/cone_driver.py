@@ -57,6 +57,12 @@ CONE_SCANS = 5                  # LiDAR scans the cone's range is measured from
 CONE_DEPTH = 0.15               # m, returns this close behind the nearest are the same object
 ALIGN_TRIES = 5                 # Task 2: turn-to-bearing corrections before giving up
 RETURN_PATH_SAMPLE = 0.10       # m, record an odometry point this often on the way out
+RETURN_HEADING_DEADBAND = math.radians(3.0)     # rad, drive straight within this heading error
+RETURN_TURN_SPEED = 0.15        # rad/s, fixed heading correction outside the deadband
+RETURN_LOOKAHEAD = 0.30         # m, steer toward the recorded point at least this far ahead
+# rad, past this heading error stop and turn in place: at 0.08 m/s and 0.15 rad/s the
+# robot turns on a 0.53 m radius, too wide to reach a point 0.3 m away more than ~16 deg off
+RETURN_MAX_DRIVE_ERROR = math.radians(15.0)
 # rad, the heartbeat also logs the nearest LiDAR point this far either side of ahead, to
 # show a cone that is close but just outside the narrow front window
 HEARTBEAT_HALF_WIDTH = math.radians(30.0)
@@ -88,7 +94,7 @@ class ConeDriver(Node):
         super().__init__('cone_driver')
 
         self._colors = list(self._declare(
-            'colors', ['purple', 'orange', 'green'],
+            'colors', ['yellow', 'green', 'purple'],
             'Colors of the three cones, from: ' + ', '.join(DEFAULT_HSV)))
         unknown = [c for c in self._colors if c not in DEFAULT_HSV]
         if unknown:
@@ -639,37 +645,36 @@ class ConeDriver(Node):
         self.get_logger().info('Following the recorded path back to the starting position')
         deadline = self._now() + to_origin[-1] / TASK2_LINEAR_SPEED * 2.0 + 20.0
         try:
-            # Turn around once to face the last recorded part of the outbound path.
-            first_x, first_y = path[waypoint]
-            bearing = math.atan2(first_y - self._y, first_x - self._x)
-            self._turn_to(bearing)
-            while self._now() <= deadline and waypoint >= 0:
+            while self._now() <= deadline:
                 self._fresh_yaw()
-                target_x, target_y = path[waypoint]
-                dx = target_x - self._x
-                dy = target_y - self._y
-                distance = math.hypot(dx, dy)
-                if distance <= 0.08:
+                # Aim at the first recorded point at least RETURN_LOOKAHEAD away, so the
+                # heading to it changes slowly
+                while waypoint > 0 and math.hypot(path[waypoint][0] - self._x,
+                                                  path[waypoint][1] - self._y) < RETURN_LOOKAHEAD:
                     waypoint -= 1
-                    continue
+                dx = path[waypoint][0] - self._x
+                dy = path[waypoint][1] - self._y
+                if waypoint == 0 and math.hypot(dx, dy) <= 0.08:
+                    self.get_logger().info('Back at the starting position')
+                    return
                 front = self._fresh_front()
                 if not math.isfinite(front) or front < 0.25:
                     raise Abort('blocked or invalid LiDAR range on the return path')
                 bearing = math.atan2(dy, dx)
                 heading_error = wrap_angle(bearing - self._yaw)
-                # Slow down only near the starting position, from the distance left along
-                # the whole path; slowing near each recorded point made the speed a
-                # sawtooth. Slow down and steer more on bends instead of stopping to turn.
-                remaining = distance + to_origin[waypoint]
-                speed = min(TASK2_LINEAR_SPEED, max(0.03, remaining * 0.5))
-                if abs(heading_error) > math.radians(35.0):
-                    speed = min(speed, 0.04)
-                angular = max(-TASK2_TURN_SPEED,
-                              min(TASK2_TURN_SPEED, heading_error * 1.5))
-                self._step(speed, angular)
-            if waypoint < 0:
-                self.get_logger().info('Back at the starting position')
-                return
+                if abs(heading_error) > RETURN_MAX_DRIVE_ERROR:
+                    # too far off for the fixed correction while driving (at the start,
+                    # facing the cone): stop and turn in place first
+                    self._turn_to(bearing)
+                    continue
+                # One steady command while driving: TASK2_LINEAR_SPEED straight ahead,
+                # plus a fixed RETURN_TURN_SPEED correction only while the heading is off
+                # by more than RETURN_HEADING_DEADBAND
+                if abs(heading_error) <= RETURN_HEADING_DEADBAND:
+                    angular = 0.0
+                else:
+                    angular = math.copysign(RETURN_TURN_SPEED, heading_error)
+                self._step(TASK2_LINEAR_SPEED, angular)
             raise Abort('timed out returning along the recorded path')
         finally:
             self.stop()
