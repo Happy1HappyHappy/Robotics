@@ -13,16 +13,18 @@ position before asking for the next color.
 ## Task 1
 
 1. Turn left at `turn_speed` until odometry says the robot has turned 360 degrees.
-2. For each image and each color: HSV mask, then the largest blob. If the blob is closer to
-   the image's center column than in any earlier image, save the robot's yaw and the LiDAR
-   range straight ahead at that moment.
+2. For each image and each color: HSV mask, then the largest blob, and its bearing
+   `atan((cx - u) / fx)` from the focal length (`camera_info`, else `hfov`). If the bearing
+   is smaller than in any earlier image, save the cone's yaw (robot yaw + bearing) and the
+   LiDAR range straight ahead at that moment.
 3. Stop, then print each color's direction and distance.
 
 ## Task 2 (loop until `q`)
 
 1. Ask for a color.
 2. Turn to the saved yaw (odometry).
-3. Turn until the blob is in the middle of the image (camera, `center_tolerance` px).
+3. Standing still, compute the blob's bearing and turn that far by odometry; repeat until
+   it is within `center_tolerance` rad.
 4. Drive slowly while keeping the cone centered. Stop when the LiDAR's front range is at or
    below `stop_range`.
 5. Return to the odometry position recorded before Task 1, then ask for the next color.

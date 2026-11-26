@@ -55,6 +55,22 @@ def wrap_angle(angle):
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
+def pixel_bearing(u, fx, cx):
+    """
+    Return the direction (rad, + = left) of image column u from the camera's optical axis.
+
+    A pinhole camera puts a point x to the right at depth z on column u = cx + fx x / z, so
+    column u is atan((cx - u) / fx) to the left of straight ahead. fx is the focal length
+    and cx the optical center's column, both in pixels.
+    """
+    return math.atan2(cx - u, fx)
+
+
+def focal_from_fov(width, hfov):
+    """Return the focal length (px) of a camera whose width px span hfov rad across."""
+    return (width / 2.0) / math.tan(hfov / 2.0)
+
+
 def yaw_from_quaternion(q):
     """
     Return the yaw (rotation about z, rad) of a quaternion.

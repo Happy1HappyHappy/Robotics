@@ -26,4 +26,8 @@ cone_driver:
     # center to the robot's front edge, plus 0.025 (1 inch), plus half the cone's base.
     # Start large and lower it after test runs.
     stop_distance: 0.35       # m
-    center_tolerance: 0.06    # fraction of image half-width
+    # rad, drive once the cone's camera bearing (from the focal length) is this small
+    center_tolerance: 0.026   # 1.5 deg
+    # rad, camera's horizontal field of view; gives the focal length only until
+    # oakd/rgb/preview/camera_info arrives (then its k[0] and k[2] are used)
+    hfov: 1.2043              # 69 deg

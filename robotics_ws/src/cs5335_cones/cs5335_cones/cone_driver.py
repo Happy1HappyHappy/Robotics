@@ -29,8 +29,8 @@ import statistics
 import threading
 import time
 
-from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_window, is_narrow,
-                                  wrap_angle, yaw_from_quaternion)
+from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, focal_from_fov, front_window,
+                                  is_narrow, pixel_bearing, wrap_angle, yaw_from_quaternion)
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import TwistStamped
 from irobot_create_msgs.msg import HazardDetection, HazardDetectionVector
@@ -42,7 +42,7 @@ from rclpy.logging import get_logger
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import CameraInfo, Image, LaserScan
 
 FULL_TURN = 2.0 * math.pi       # rad
 CONTROL_PERIOD = 0.02           # s, one velocity command every 20 ms (50 Hz)
@@ -54,6 +54,7 @@ TASK2_TURN_SPEED = 0.25         # rad/s, slow alignment and heading turns
 SETTLE_TIME = 0.5               # s, wait after stopping before measuring the cone
 CONE_SCANS = 5                  # LiDAR scans the cone's range is measured from
 CONE_DEPTH = 0.15               # m, returns this close behind the nearest are the same object
+ALIGN_TRIES = 5                 # Task 2: turn-to-bearing corrections before giving up
 RETURN_PATH_SAMPLE = 0.10       # m, record an odometry point this often on the way out
 
 # Hazards that stop the robot, with the name to log
@@ -71,8 +72,8 @@ class Abort(Exception):
 class Sighting:
     """Task 1's best view of one cone so far."""
 
-    offset: float       # px, from the blob's center to the image's center column
-    yaw: float          # rad, odom frame, which way the robot faced then
+    offset: float       # rad, |bearing| of the blob from the camera's optical axis
+    yaw: float          # rad, odom frame, which way the cone was (robot yaw + bearing)
     distance: float     # m, the LiDAR's front range then (math.inf if no reading)
 
 
@@ -117,17 +118,23 @@ class ConeDriver(Node):
             "LiDAR to the robot's front edge, plus about 1 inch, plus half the cone's base",
             0.2, 1.0)
         self._center_tolerance = self._declare(
-            'center_tolerance', 0.06,
-            'Allow this fraction of the image half-width from center before driving',
-            0.01, 0.25)
+            'center_tolerance', math.radians(1.5),
+            'Largest camera bearing to the cone (rad) at which to stop aligning and drive',
+            0.005, 0.2)
+        self._hfov = self._declare(
+            'hfov', math.radians(69.0),
+            "Camera's horizontal field of view (rad), used for the focal length only while "
+            'camera_info has not arrived', 0.5, 2.5)
 
         self._bridge = CvBridge()
 
         # The latest data, and when it arrived (node clock). Each time stays None until
         # the first message. A callback sets the value first and the time second, so data
         # is never older than its time says.
-        self._image = None          # BGR image, a NumPy array of rows x columns x 3
+        # (BGR image, a NumPy array of rows x columns x 3; odom yaw (rad) when it arrived)
+        self._image = None
         self._image_time = None
+        self._camera = None         # (fx px, cx px, image width px) from camera_info
         self._front = None          # m, nearest LiDAR range straight ahead (math.inf: none)
         self._front_object = None   # (that range, whether it is a narrow object like a cone)
         self._front_time = None
@@ -157,6 +164,8 @@ class ConeDriver(Node):
         self._command_timer = self.create_timer(CONTROL_PERIOD, self._repeat_command)
         self.create_subscription(Image, 'oakd/rgb/preview/image_raw',
                                  self._image_callback, qos_profile_sensor_data)
+        self.create_subscription(CameraInfo, 'oakd/rgb/preview/camera_info',
+                                 self._camera_info_callback, qos_profile_sensor_data)
         self.create_subscription(LaserScan, 'scan',
                                  self._scan_callback, qos_profile_sensor_data)
         self.create_subscription(Odometry, 'odom',
@@ -178,12 +187,19 @@ class ConeDriver(Node):
     def _image_callback(self, msg):
         """Store the latest camera image as an OpenCV BGR array."""
         try:
-            self._image = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            image = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except CvBridgeError as e:
             self.get_logger().warn(f'Cannot convert the image: {e}',
                                    throttle_duration_sec=5.0)
             return
+        # one assignment, so the main thread never pairs an image with another one's yaw
+        self._image = (image, self._yaw)
         self._image_time = self.get_clock().now()
+
+    def _camera_info_callback(self, msg):
+        """Store the camera's focal length and optical center column (px), if calibrated."""
+        if msg.k[0] > 0.0 and msg.width > 0:
+            self._camera = (msg.k[0], msg.k[2], msg.width)
 
     def _scan_callback(self, msg):
         """Store the nearest LiDAR range straight ahead, and whether it is a narrow object."""
@@ -269,11 +285,29 @@ class ConeDriver(Node):
         return self._front
 
     def _fresh_image(self):
-        """Return the latest camera image; raise Abort if it is missing or stale."""
+        """Return the latest (image, yaw when it arrived); raise Abort if missing or stale."""
         age = self._age(self._image_time)
         if age is None or age > self._data_timeout:
             raise Abort('camera image stopped arriving')
         return self._image
+
+    def _camera_model(self, width):
+        """
+        Return the focal length and optical center column (px) for an image width px across.
+
+        From camera_info, scaled if its width differs from the image's; until it arrives,
+        from the hfov parameter with the center in the middle of the image.
+        """
+        if self._camera is not None:
+            fx, cx, info_width = self._camera
+            scale = width / info_width
+            return fx * scale, (cx + 0.5) * scale - 0.5
+        return focal_from_fov(width, self._hfov), (width - 1) / 2.0
+
+    def _bearing(self, image, blob):
+        """Return the direction (rad, + = left) of a blob from the camera's optical axis."""
+        fx, cx = self._camera_model(image.shape[1])
+        return pixel_bearing(blob.u, fx, cx)
 
     def _publish(self, linear, angular):
         """Publish a velocity command (m/s forward, rad/s left), clamped to the limits."""
@@ -332,9 +366,12 @@ class ConeDriver(Node):
                                                 ('camera images', self._image_time))
                        if stamp is None]
             if not missing:
-                rows, columns = self._image.shape[:2]
+                rows, columns = self._image[0].shape[:2]
+                fx, cx = self._camera_model(columns)
+                source = 'camera_info' if self._camera is not None else 'hfov (no camera_info)'
                 self.get_logger().info(
-                    f'Data arriving: image {columns}x{rows}, front range '
+                    f'Data arriving: image {columns}x{rows}, focal length {fx:.1f} px, '
+                    f'center column {cx:.1f} px from {source}, front range '
                     f'{self._front:.2f} m, yaw {math.degrees(self._yaw):+.1f} deg')
                 return True
             self.get_logger().info('Waiting for ' + ', '.join(missing),
@@ -350,8 +387,10 @@ class ConeDriver(Node):
         """
         Turn once around in place and return each color's best sighting.
 
-        A color's best sighting is the image in which its blob was closest to the image's
-        center column, so the robot was facing that cone then.
+        A color's best sighting is the image in which its blob was closest to the camera's
+        optical axis, where the LiDAR's front range is most likely the cone's. The cone's
+        direction is the robot's yaw when that image arrived plus the blob's bearing, from
+        the focal length.
         """
         self.get_logger().info('Task 1: turning 360 degrees to look for the cones')
         sightings = {}
@@ -371,25 +410,26 @@ class ConeDriver(Node):
                 # None (comparing an rclpy Time with None raises TypeError)
                 if self._image_time is not last_image_time:
                     last_image_time = self._image_time
-                    self._look(self._image, yaw, sightings)
+                    self._look(*self._image, sightings)
         finally:
             self.stop()
         return sightings
 
     def _look(self, image, yaw, sightings):
-        """Update sightings with each color's blob in one camera image."""
-        center = (image.shape[1] - 1) / 2.0
+        """Update sightings with each color's blob in one camera image taken at yaw (rad)."""
+        if yaw is None:
+            return
         distance = self._fresh_front()
         for color in self._colors:
             blob = find_blob(image, self._hsv[color], self._min_area)
             if blob is None:
                 continue
-            offset = abs(blob.u - center)
-            if color in sightings and sightings[color].offset <= offset:
+            bearing = self._bearing(image, blob)
+            if color in sightings and sightings[color].offset <= abs(bearing):
                 continue
             if color not in sightings:
                 self.get_logger().info(f'  saw {color}')
-            sightings[color] = Sighting(offset, yaw, distance)
+            sightings[color] = Sighting(abs(bearing), wrap_angle(yaw + bearing), distance)
 
     def _report(self, sightings):
         """Log each color's direction from where the robot faces now, and its distance."""
@@ -407,13 +447,13 @@ class ConeDriver(Node):
 
     # ---------- Task 2 ----------
 
-    def _turn_to(self, target_yaw):
-        """Turn in place toward a cone's remembered odometry heading."""
+    def _turn_to(self, target_yaw, tolerance=math.radians(3.0)):
+        """Turn in place until the odometry yaw is within tolerance (rad) of target_yaw."""
         deadline = self._now() + 30.0
         try:
             while True:
                 error = wrap_angle(target_yaw - self._fresh_yaw())
-                if abs(error) < math.radians(3.0):
+                if abs(error) < tolerance:
                     return
                 if self._now() > deadline:
                     raise Abort('timed out turning toward the cone')
@@ -421,6 +461,50 @@ class ConeDriver(Node):
                 self._step(0.0, angular)
         finally:
             self.stop()
+
+    def _image_after_stop(self):
+        """Wait SETTLE_TIME, then for a newer image; return (image, yaw when it arrived)."""
+        time.sleep(SETTLE_TIME)
+        last_time = self._image_time
+        deadline = self._now() + 2.0
+        # each image gets a new time object (see find_cones)
+        while self._image_time is last_time:
+            if self._now() > deadline:
+                raise Abort('camera image stopped arriving')
+            time.sleep(CONTROL_PERIOD)
+        return self._fresh_image()
+
+    def _align_with_camera(self, color):
+        """
+        Turn until the cone is straight ahead, so the LiDAR's front window holds it.
+
+        Standing still, the blob's column and the focal length give the cone's bearing;
+        the robot turns that far by odometry, then checks a new image, up to ALIGN_TRIES
+        times. If the cone is not in view, it turns slowly left until the cone appears.
+        """
+        tries = 0
+        search_deadline = self._now() + 20.0
+        while True:
+            image, yaw = self._image_after_stop()
+            blob = find_blob(image, self._hsv[color], self._min_area)
+            if blob is None:
+                if self._now() > search_deadline:
+                    raise Abort(f'cannot find {color} in the camera image')
+                try:
+                    for _ in range(int(0.5 / CONTROL_PERIOD)):     # about 7 degrees
+                        self._step(0.0, TASK2_TURN_SPEED)
+                finally:
+                    self.stop()
+                continue
+            bearing = self._bearing(image, blob)
+            self.get_logger().info(
+                f'{color} is {math.degrees(bearing):+.1f} deg from the camera axis')
+            if abs(bearing) <= self._center_tolerance:
+                return
+            tries += 1
+            if tries > ALIGN_TRIES:
+                raise Abort(f'could not center {color} within {ALIGN_TRIES} turns')
+            self._turn_to(wrap_angle(yaw + bearing), self._center_tolerance / 2.0)
 
     def _record_approach_position(self, force=False):
         """Save the current odometry position when far enough from the last path point."""
@@ -477,25 +561,7 @@ class ConeDriver(Node):
         self._turn_to(sighting.yaw)
         self._approach_path = [(self._x, self._y)]
         try:
-            # Center the cone in the camera image, so it is straight ahead for the LiDAR.
-            # If the cone is not yet visible, rotate slowly until it appears.
-            align_deadline = self._now() + 20.0
-            while self._now() <= align_deadline:
-                image = self._fresh_image()
-                blob = find_blob(image, self._hsv[color], self._min_area)
-                if blob is None:
-                    self._step(0.0, TASK2_TURN_SPEED)
-                    continue
-                center = (image.shape[1] - 1) / 2.0
-                error = (blob.u - center) / max(1.0, center)
-                if abs(error) <= self._center_tolerance:
-                    break
-                angular = max(-TASK2_TURN_SPEED,
-                              min(TASK2_TURN_SPEED, -error * TASK2_TURN_SPEED))
-                self._step(0.0, angular)
-            else:
-                raise Abort(f'timed out centering {color} in the camera image')
-            self.stop()
+            self._align_with_camera(color)
 
             # Measure once, standing still
             cone_range = self._measure_cone_range()

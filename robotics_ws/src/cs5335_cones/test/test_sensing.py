@@ -17,8 +17,9 @@
 import math
 from types import SimpleNamespace
 
-from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, front_window,
-                                  is_narrow, wrap_angle, yaw_from_quaternion)
+from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, focal_from_fov, front_range,
+                                  front_window, is_narrow, pixel_bearing, wrap_angle,
+                                  yaw_from_quaternion)
 import cv2
 import numpy as np
 import pytest
@@ -147,3 +148,23 @@ def test_find_blob_ignores_other_colors_and_small_regions():
     cv2.rectangle(image, (40, 30), (59, 79), BLUE, -1)      # not orange
     cv2.rectangle(image, (150, 50), (152, 52), ORANGE, -1)  # orange, but 3 x 3 px
     assert find_blob(image, DEFAULT_HSV['orange'], 50) is None
+
+
+def test_pixel_bearing_center_left_and_right():
+    assert pixel_bearing(160.0, 200.0, 160.0) == pytest.approx(0.0)
+    # a column left of the optical center is to the left: positive (REP 103)
+    assert pixel_bearing(60.0, 200.0, 160.0) == pytest.approx(math.atan(0.5))
+    assert pixel_bearing(260.0, 200.0, 160.0) == pytest.approx(-math.atan(0.5))
+
+
+def test_focal_from_fov_puts_the_image_edge_at_half_the_fov():
+    width, hfov = 320, math.radians(69.0)
+    fx = focal_from_fov(width, hfov)
+    assert pixel_bearing(0.0, fx, width / 2.0) == pytest.approx(hfov / 2.0)
+
+
+def test_bearing_of_a_point_seen_by_a_pinhole_camera():
+    fx, cx = 250.0, 155.0
+    x_right, z = 0.3, 1.2               # m, a cone right of and ahead of the camera
+    u = cx + fx * x_right / z
+    assert pixel_bearing(u, fx, cx) == pytest.approx(-math.atan2(x_right, z))

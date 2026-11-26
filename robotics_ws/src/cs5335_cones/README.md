@@ -46,11 +46,17 @@ without it, the robot does not move.
 ## Cone Search and Approach
 
 During the 360-degree search, the robot uses odometry yaw to measure its rotation. For each
-cone color, it keeps the sighting where the color blob is closest to the center of the camera
-image, along with the robot's yaw and the LiDAR distance in meters at that time.
+cone color, it keeps the sighting where the color blob is closest to the camera's optical
+axis, with the LiDAR distance in meters at that time. The cone's direction is the robot's yaw
+when that image arrived plus the blob's bearing from the pinhole model,
+`atan((cx - u) / fx)`: `u` is the blob's center column, `fx` the focal length and `cx` the
+optical center column, in pixels. `fx` and `cx` come from
+`oakd/rgb/preview/camera_info`; until it arrives, `fx` is computed from the `hfov` parameter
+and `cx` is the middle of the image.
 
-For the approach, the robot turns to the yaw recorded for the selected cone and turns until
-the cone is centered in the camera image. Standing still, it then measures the cone's range
+For the approach, the robot turns to the direction recorded for the selected cone. Standing
+still, it computes the cone's bearing in a new camera image and turns that far by odometry,
+repeating until the bearing is within `center_tolerance`. Standing still, it then measures the cone's range
 once with the LiDAR, and drives that range minus `stop_distance` by odometry, without
 measuring again. Odometry positions recorded during the approach are followed in reverse to
 return to the starting position.
@@ -90,4 +96,5 @@ ros2 run cs5335_cones cone_driver --ros-args --params-file src/cs5335_cones/conf
 | `turn_speed` | Angular speed in rad/s during the 360-degree search. |
 | `lidar_yaw` | LiDAR mounting angle relative to the robot, in radians. |
 | `stop_distance` | Distance in meters from the LiDAR to the cone's center at which the approach stops: from the LiDAR's center to the robot's front edge, plus the gap to leave (about 1 inch), plus half the cone's base. Measure it with a ruler; start large and lower it after test runs. |
-| `center_tolerance` | Allowed cone offset from the camera center, as a fraction of the image half-width. |
+| `center_tolerance` | Largest camera bearing to the cone, in radians, at which the approach stops aligning and drives. |
+| `hfov` | Camera's horizontal field of view in radians, used for the focal length only while `camera_info` has not arrived. Check `timeout 5 ros2 topic echo /oakd/rgb/preview/camera_info --once`. |
