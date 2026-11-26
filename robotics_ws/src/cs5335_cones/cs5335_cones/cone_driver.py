@@ -84,7 +84,7 @@ class ConeDriver(Node):
         super().__init__('cone_driver')
 
         self._colors = list(self._declare(
-            'colors', ['orange', 'green', 'blue'],
+            'colors', ['purple', 'orange', 'green'],
             'Colors of the three cones, from: ' + ', '.join(DEFAULT_HSV)))
         unknown = [c for c in self._colors if c not in DEFAULT_HSV]
         if unknown:
@@ -607,9 +607,13 @@ class ConeDriver(Node):
             path = [self._origin, (self._x, self._y)]
         # The route should finish at the position captured before the initial scan.
         path[0] = self._origin
+        # to_origin[i]: m along the path from path[i] back to the starting position
+        to_origin = [0.0]
+        for (x0, y0), (x1, y1) in zip(path, path[1:]):
+            to_origin.append(to_origin[-1] + math.hypot(x1 - x0, y1 - y0))
         waypoint = len(path) - 2
         self.get_logger().info('Following the recorded path back to the starting position')
-        deadline = self._now() + 60.0
+        deadline = self._now() + to_origin[-1] / TASK2_LINEAR_SPEED * 2.0 + 20.0
         try:
             # Turn around once to face the last recorded part of the outbound path.
             first_x, first_y = path[waypoint]
@@ -629,9 +633,11 @@ class ConeDriver(Node):
                     raise Abort('blocked or invalid LiDAR range on the return path')
                 bearing = math.atan2(dy, dx)
                 heading_error = wrap_angle(bearing - self._yaw)
-                # Keep moving between recorded points; slow down and steer more on
-                # bends instead of stopping to turn at every waypoint.
-                speed = min(TASK2_LINEAR_SPEED, max(0.03, distance * 0.5))
+                # Slow down only near the starting position, from the distance left along
+                # the whole path; slowing near each recorded point made the speed a
+                # sawtooth. Slow down and steer more on bends instead of stopping to turn.
+                remaining = distance + to_origin[waypoint]
+                speed = min(TASK2_LINEAR_SPEED, max(0.03, remaining * 0.5))
                 if abs(heading_error) > math.radians(35.0):
                     speed = min(speed, 0.04)
                 angular = max(-TASK2_TURN_SPEED,
