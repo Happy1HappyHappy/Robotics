@@ -17,8 +17,8 @@
 import math
 from types import SimpleNamespace
 
-from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, wrap_angle,
-                                  yaw_from_quaternion)
+from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, front_window,
+                                  is_narrow, wrap_angle, yaw_from_quaternion)
 import cv2
 import numpy as np
 import pytest
@@ -83,6 +83,40 @@ def test_front_range_skips_invalid_ranges():
     ranges = [2.0] * 360
     ranges[178:183] = [math.inf, math.nan, 0.05, 20.0, math.inf]
     assert front_range(make_scan(ranges), 0.0, math.radians(2.0)) == math.inf
+
+
+def test_front_window_marks_invalid_ranges_as_no_return():
+    ranges = [2.0] * 360
+    ranges[178:183] = [math.inf, math.nan, 0.05, 1.0, 20.0]
+    window = front_window(make_scan(ranges), 0.0, math.radians(2.5))
+    assert window == [math.inf, math.inf, math.inf, 1.0, math.inf]
+
+
+def test_a_cone_tip_in_front_of_a_wall_is_narrow():
+    # the beam grazes the cone's tip in 2 of 11 directions; the rest reach the wall
+    ranges = [3.0] * 360
+    ranges[90:92] = [1.6, 1.62]
+    window = front_window(make_scan(ranges), math.pi / 2.0, math.radians(5.5))
+    assert len(window) == 11
+    assert is_narrow(window, 0.15)
+
+
+def test_a_cone_tip_with_nothing_behind_it_is_narrow():
+    ranges = [math.inf] * 360
+    ranges[90] = 1.8
+    assert is_narrow(front_window(make_scan(ranges), math.pi / 2.0, math.radians(5.0)), 0.15)
+
+
+def test_a_wall_is_not_narrow():
+    # a wall seen at a slant: the ranges change a little across the window, not past depth
+    ranges = [1.6 + 0.01 * abs(i - 90) for i in range(360)]
+    assert not is_narrow(front_window(make_scan(ranges), math.pi / 2.0, math.radians(5.5)),
+                         0.15)
+
+
+def test_nothing_ahead_is_not_narrow():
+    assert not is_narrow([math.inf] * 11, 0.15)
+    assert not is_narrow([], 0.15)
 
 
 def test_find_blob_center_column():

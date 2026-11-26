@@ -25,11 +25,12 @@ while the executor spins in a background thread.
 
 from dataclasses import dataclass
 import math
+import statistics
 import threading
 import time
 
-from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, wrap_angle,
-                                  yaw_from_quaternion)
+from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_window, is_narrow,
+                                  wrap_angle, yaw_from_quaternion)
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import TwistStamped
 from irobot_create_msgs.msg import HazardDetection, HazardDetectionVector
@@ -50,7 +51,9 @@ MAX_LINEAR_SPEED = 0.15         # m/s (the TurtleBot 4 can do 0.31)
 MAX_ANGULAR_SPEED = 0.8         # rad/s (the TurtleBot 4 can do 1.9)
 TASK2_LINEAR_SPEED = 0.08       # m/s, keep the approach slow
 TASK2_TURN_SPEED = 0.25         # rad/s, slow alignment and heading turns
-TASK2_ALIGNMENT_DISTANCE = 1.0  # m, odometry distance before the camera realignment
+SETTLE_TIME = 0.5               # s, wait after stopping before measuring the cone
+CONE_SCANS = 5                  # LiDAR scans the cone's range is measured from
+CONE_DEPTH = 0.15               # m, returns this close behind the nearest are the same object
 RETURN_PATH_SAMPLE = 0.10       # m, record an odometry point this often on the way out
 
 # Hazards that stop the robot, with the name to log
@@ -108,10 +111,11 @@ class ConeDriver(Node):
             'Half the width of the LiDAR window straight ahead (rad)', 0.01, 0.5)
         self._data_timeout = self._declare(
             'data_timeout', 0.5, 'Stop if odometry is older than this (s)', 0.1, 5.0)
-        self._stop_range = self._declare(
-            'stop_range', 0.20,
-            'LiDAR range at which to stop before the cone (m); tune to leave about 1 inch',
-            0.15, 0.35)
+        self._stop_distance = self._declare(
+            'stop_distance', 0.35,
+            'Distance from the LiDAR to the cone center at which to stop (m): from the '
+            "LiDAR to the robot's front edge, plus about 1 inch, plus half the cone's base",
+            0.2, 1.0)
         self._center_tolerance = self._declare(
             'center_tolerance', 0.06,
             'Allow this fraction of the image half-width from center before driving',
@@ -125,6 +129,7 @@ class ConeDriver(Node):
         self._image = None          # BGR image, a NumPy array of rows x columns x 3
         self._image_time = None
         self._front = None          # m, nearest LiDAR range straight ahead (math.inf: none)
+        self._front_object = None   # (that range, whether it is a narrow object like a cone)
         self._front_time = None
         self._x = None               # m, odom frame
         self._y = None               # m, odom frame
@@ -181,8 +186,12 @@ class ConeDriver(Node):
         self._image_time = self.get_clock().now()
 
     def _scan_callback(self, msg):
-        """Store the nearest LiDAR range straight ahead."""
-        self._front = front_range(msg, self._lidar_yaw, self._front_half_width)
+        """Store the nearest LiDAR range straight ahead, and whether it is a narrow object."""
+        window = front_window(msg, self._lidar_yaw, self._front_half_width)
+        front = min(window, default=math.inf)
+        # one assignment, so the main thread never reads a range with another scan's flag
+        self._front_object = (front, is_narrow(window, CONE_DEPTH))
+        self._front = front
         self._front_time = self.get_clock().now()
 
     def _odom_callback(self, msg):
@@ -423,42 +432,54 @@ class ConeDriver(Node):
         if distance >= RETURN_PATH_SAMPLE or (force and distance > 0.01):
             self._approach_path.append((self._x, self._y))
 
+    def _measure_cone_range(self):
+        """
+        Return the LiDAR range (m) to the cone straight ahead, measured standing still.
+
+        Waits SETTLE_TIME after stopping, then reads CONE_SCANS new scans. A scan sees the
+        cone when the nearest return ahead is a narrow object (is_narrow), not a wall. The
+        cones are shorter than the LiDAR, which sees one only from far away, where its beam
+        has dropped just enough to graze the cone's tip. If most scans do not see it, raise
+        Abort rather than drive. Return the median of the ranges of the scans that saw it.
+        """
+        time.sleep(SETTLE_TIME)
+        deadline = self._now() + CONE_SCANS + 2.0
+        last_time = self._front_time
+        scans = 0
+        ranges = []
+        while scans < CONE_SCANS:
+            if self._now() > deadline:
+                raise Abort('LiDAR scans (scan) stopped arriving')
+            # each scan gets a new time object (see find_cones)
+            if self._front_time is not last_time:
+                last_time = self._front_time
+                scans += 1
+                front, narrow = self._front_object
+                if narrow:
+                    ranges.append(front)
+            time.sleep(CONTROL_PERIOD)
+        if len(ranges) <= CONE_SCANS // 2:
+            raise Abort(f'the LiDAR saw a narrow object ahead in only {len(ranges)} of '
+                        f'{CONE_SCANS} scans; it may not reach the cone from here, so not '
+                        'driving')
+        return statistics.median(ranges)
+
     def drive_to_cone(self, color, sighting):
-        """Drive 1 m by odometry, realign once, then approach to the LiDAR stop range."""
+        """
+        Center the cone in the camera, measure its range once with the LiDAR, drive there.
+
+        The cones are shorter than the LiDAR, which sees one only from far away and loses
+        it up close. So the range is measured once, standing still at the start, and the
+        robot then drives that far by odometry without measuring again. It stops when the
+        LiDAR is stop_distance from the cone's center.
+        """
         self.get_logger().info(f'Task 2: approaching {color}; target gap about 1 inch')
         self._turn_to(sighting.yaw)
-        deadline = self._now() + 60.0
-        start_x, start_y = self._x, self._y
-        self._approach_path = [(start_x, start_y)]
+        self._approach_path = [(self._x, self._y)]
         try:
-            # Drive the first meter along the remembered cone heading. Odometry holds
-            # that heading; the camera is used for the planned realignment at 1 m.
-            while self._now() <= deadline:
-                front = self._fresh_front()
-                if front <= self._stop_range:
-                    self._record_approach_position(force=True)
-                    self.get_logger().info(
-                        f'Reached {color}: front range {front:.2f} m (stop threshold '
-                        f'{self._stop_range:.2f} m)')
-                    return
-                if not math.isfinite(front):
-                    raise Abort('no valid LiDAR range ahead; refusing to drive')
-                distance = math.hypot(self._x - start_x, self._y - start_y)
-                if distance >= TASK2_ALIGNMENT_DISTANCE:
-                    break
-                heading_error = wrap_angle(sighting.yaw - self._fresh_yaw())
-                angular = max(-0.15, min(0.15, heading_error * 1.5))
-                self._step(TASK2_LINEAR_SPEED, angular)
-                self._record_approach_position()
-            else:
-                raise Abort(f'timed out driving the first {TASK2_ALIGNMENT_DISTANCE:.1f} m')
-
-            self.stop()
-            self.get_logger().info(
-                f'Drove {TASK2_ALIGNMENT_DISTANCE:.1f} m by odometry; realigning with camera')
-            # Stop and use the camera to center the cone once. If the cone is not yet
-            # visible, rotate slowly until it appears; abort rather than drive blind.
-            align_deadline = min(deadline, self._now() + 20.0)
+            # Center the cone in the camera image, so it is straight ahead for the LiDAR.
+            # If the cone is not yet visible, rotate slowly until it appears.
+            align_deadline = self._now() + 20.0
             while self._now() <= align_deadline:
                 image = self._fresh_image()
                 blob = find_blob(image, self._hsv[color], self._min_area)
@@ -473,27 +494,36 @@ class ConeDriver(Node):
                               min(TASK2_TURN_SPEED, -error * TASK2_TURN_SPEED))
                 self._step(0.0, angular)
             else:
-                raise Abort(f'timed out realigning with {color}')
+                raise Abort(f'timed out centering {color} in the camera image')
             self.stop()
 
-            # After this one camera correction, keep the corrected odometry heading
-            # and use LiDAR for the stopping decision.
+            # Measure once, standing still
+            cone_range = self._measure_cone_range()
+            travel = cone_range - self._stop_distance
+            self.get_logger().info(
+                f'LiDAR sees the {color} cone {cone_range:.2f} m ahead; driving '
+                f'{max(0.0, travel):.2f} m by odometry')
+
+            # Drive that far by odometry, holding the heading the camera gave, without
+            # measuring again; slow down over the last few centimeters
             approach_yaw = self._fresh_yaw()
-            while self._now() <= deadline:
-                front = self._fresh_front()
-                if front <= self._stop_range:
-                    self._record_approach_position(force=True)
-                    self.get_logger().info(
-                        f'Reached {color}: front range {front:.2f} m (stop threshold '
-                        f'{self._stop_range:.2f} m)')
-                    return
-                if not math.isfinite(front):
-                    raise Abort('no valid LiDAR range ahead; refusing to drive')
+            start_x, start_y = self._x, self._y
+            deadline = self._now() + max(0.0, travel) / TASK2_LINEAR_SPEED * 2.0 + 10.0
+            while True:
+                remaining = travel - math.hypot(self._x - start_x, self._y - start_y)
+                if remaining <= 0.0:
+                    break
+                if self._now() > deadline:
+                    raise Abort(f'timed out approaching {color}')
                 heading_error = wrap_angle(approach_yaw - self._fresh_yaw())
                 angular = max(-0.15, min(0.15, heading_error * 1.5))
-                self._step(TASK2_LINEAR_SPEED, angular)
+                self._step(min(TASK2_LINEAR_SPEED, max(0.03, remaining * 0.5)), angular)
                 self._record_approach_position()
-            raise Abort(f'timed out approaching {color}')
+            self._record_approach_position(force=True)
+            driven = math.hypot(self._x - start_x, self._y - start_y)
+            self.get_logger().info(
+                f'Reached {color}: drove {driven:.2f} m, so the LiDAR is about '
+                f'{cone_range - driven:.2f} m from its center')
         finally:
             self.stop()
 

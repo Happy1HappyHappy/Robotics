@@ -65,24 +65,48 @@ def yaw_from_quaternion(q):
                       1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
-def front_range(scan, lidar_yaw, half_width):
+def front_window(scan, lidar_yaw, half_width):
     """
-    Return the nearest valid LiDAR range (m) within half_width rad of straight ahead.
+    Return the LiDAR ranges (m) within half_width rad of straight ahead, in scan order.
 
     scan is anything with the fields of a sensor_msgs/LaserScan (ranges, angle_min,
     angle_increment, range_min, range_max). lidar_yaw is how far the LiDAR is turned on
     the robot: LiDAR angle a points to a + lidar_yaw in the robot's frame. Ranges outside
-    [range_min, range_max], including inf and NaN, are skipped. If no valid range is in
-    that direction, the result is math.inf.
+    [range_min, range_max], including inf and NaN, become math.inf (no return that way).
     """
-    nearest = math.inf
+    window = []
     for i, r in enumerate(scan.ranges):
-        if not scan.range_min <= r <= scan.range_max:
-            continue
         angle = wrap_angle(scan.angle_min + i * scan.angle_increment + lidar_yaw)
         if abs(angle) <= half_width:
-            nearest = min(nearest, r)
-    return nearest
+            window.append(r if scan.range_min <= r <= scan.range_max else math.inf)
+    return window
+
+
+def front_range(scan, lidar_yaw, half_width):
+    """
+    Return the nearest valid LiDAR range (m) within half_width rad of straight ahead.
+
+    The arguments are those of front_window. If no valid range is in that direction, the
+    result is math.inf.
+    """
+    return min(front_window(scan, lidar_yaw, half_width), default=math.inf)
+
+
+def is_narrow(window, depth):
+    """
+    Return whether the nearest return in window is a narrow object, such as a cone.
+
+    window holds ranges (m, math.inf for no return) across a field of view, as from
+    front_window. The nearest object is narrow when fewer than half of the beams end
+    within depth m of the nearest range; the others pass beside it to something farther,
+    or to nothing. A wall or a wide box fills the window instead. False if nothing in the
+    window returned.
+    """
+    nearest = min(window, default=math.inf)
+    if not math.isfinite(nearest):
+        return False
+    close = sum(1 for r in window if r <= nearest + depth)
+    return close < len(window) / 2.0
 
 
 def find_blob(bgr, hsv_range, min_area):

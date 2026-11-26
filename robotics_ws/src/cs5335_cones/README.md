@@ -16,7 +16,9 @@ main()
          ├─ Wait for a color selection
          ├─ drive_to_cone()
          │   ├─ _turn_to()              Turn to the recorded direction
-         │   └─ Align again after 1 m, then drive until stopping
+         │   ├─ Center the cone in the camera image
+         │   ├─ _measure_cone_range()   Measure its LiDAR range once, standing still
+         │   └─ Drive that far by odometry, then stop
          └─ return_to_origin()          Follow the recorded path back to the start
 ```
 
@@ -47,10 +49,23 @@ During the 360-degree search, the robot uses odometry yaw to measure its rotatio
 cone color, it keeps the sighting where the color blob is closest to the center of the camera
 image, along with the robot's yaw and the LiDAR distance in meters at that time.
 
-For the approach, the robot turns to the yaw recorded for the selected cone. It drives 1 m
-according to odometry, stops to realign the cone using the camera, and then continues toward
-the cone until the LiDAR stopping condition is met. Odometry positions recorded during the
-approach are followed in reverse to return to the starting position.
+For the approach, the robot turns to the yaw recorded for the selected cone and turns until
+the cone is centered in the camera image. Standing still, it then measures the cone's range
+once with the LiDAR, and drives that range minus `stop_distance` by odometry, without
+measuring again. Odometry positions recorded during the approach are followed in reverse to
+return to the starting position.
+
+The cones are shorter than the LiDAR. Its beam can still graze a cone's tip from far away
+(more than about 1.5 m), but not up close, which is why the range is measured only once,
+at the start. Before the first run, check that the range Task 1 prints for each cone
+matches a tape measure. If the LiDAR does not see a cone from where the robot starts, the
+approach stops with `the LiDAR saw a narrow object ahead in only ...` instead of driving.
+
+A scan counts as seeing the cone when the nearest return within `front_half_width` of
+straight ahead is narrow: most beams in that window pass beside it to something at least
+0.15 m farther, or to nothing. A wall or a wide box ahead fills the window and does not
+count. A narrow object such as a chair leg straight ahead does count, so keep the line from
+the robot to the cone clear.
 
 ## Selecting a Cone
 
@@ -74,7 +89,5 @@ ros2 run cs5335_cones cone_driver --ros-args --params-file src/cs5335_cones/conf
 | `min_area` | Minimum color blob area in pixels to count as a detection. |
 | `turn_speed` | Angular speed in rad/s during the 360-degree search. |
 | `lidar_yaw` | LiDAR mounting angle relative to the robot, in radians. |
-| `stop_range` | Front LiDAR distance in meters at which the approach stops. |
+| `stop_distance` | Distance in meters from the LiDAR to the cone's center at which the approach stops: from the LiDAR's center to the robot's front edge, plus the gap to leave (about 1 inch), plus half the cone's base. Measure it with a ruler; start large and lower it after test runs. |
 | `center_tolerance` | Allowed cone offset from the camera center, as a fraction of the image half-width. |
-
-The 1 m odometry distance for the approach is not currently a YAML parameter.
