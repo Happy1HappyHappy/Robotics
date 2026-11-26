@@ -28,8 +28,8 @@ import math
 import threading
 import time
 
-from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, wrap_angle,
-                                  yaw_from_quaternion)
+from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, nearest_ahead,
+                                  wrap_angle, yaw_from_quaternion)
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import TwistStamped
 from irobot_create_msgs.msg import HazardDetection, HazardDetectionVector
@@ -44,7 +44,8 @@ from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import Image, LaserScan
 
 FULL_TURN = 2.0 * math.pi       # rad
-CONTROL_PERIOD = 0.02           # s, one velocity command every 20 ms (50 Hz)
+CONTROL_PERIOD = 0.02           # s, the motion loops decide every 20 ms (50 Hz)
+COMMAND_PERIOD = 0.05           # s, cmd_vel goes out every 50 ms (20 Hz); faster only loads WiFi
 HAZARD_HOLD = 1.0               # s, a bump or cliff this recent stops the robot
 MAX_LINEAR_SPEED = 0.15         # m/s (the TurtleBot 4 can do 0.31)
 MAX_ANGULAR_SPEED = 0.8         # rad/s (the TurtleBot 4 can do 1.9)
@@ -52,6 +53,9 @@ TASK2_LINEAR_SPEED = 0.08       # m/s, keep the approach slow
 TASK2_TURN_SPEED = 0.25         # rad/s, slow alignment and heading turns
 TASK2_ALIGNMENT_DISTANCE = 1.0  # m, odometry distance before the camera realignment
 RETURN_PATH_SAMPLE = 0.10       # m, record an odometry point this often on the way out
+# rad, the heartbeat also logs the nearest LiDAR point this far either side of ahead, to
+# show a cone that is close but just outside the narrow front window used for stopping
+HEARTBEAT_HALF_WIDTH = math.radians(30.0)
 
 # Hazards that stop the robot, with the name to log
 STOP_HAZARDS = {
@@ -107,7 +111,12 @@ class ConeDriver(Node):
             'front_half_width', math.radians(5.0),
             'Half the width of the LiDAR window straight ahead (rad)', 0.01, 0.5)
         self._data_timeout = self._declare(
-            'data_timeout', 0.5, 'Stop if odometry is older than this (s)', 0.1, 5.0)
+            'data_timeout', 0.5,
+            'Hold still if odometry, LiDAR or camera data is older than this (s)', 0.1, 5.0)
+        self._stale_wait = self._declare(
+            'stale_wait', 2.0,
+            'How long to hold still waiting for stale data to come back before giving up (s); '
+            'a WiFi stall delays every topic at once for a moment', 0.0, 10.0)
         self._stop_range = self._declare(
             'stop_range', 0.20,
             'LiDAR range at which to stop before the cone (m); tune to leave about 1 inch',
@@ -125,6 +134,7 @@ class ConeDriver(Node):
         self._image = None          # BGR image, a NumPy array of rows x columns x 3
         self._image_time = None
         self._front = None          # m, nearest LiDAR range straight ahead (math.inf: none)
+        self._wide = (math.inf, None)   # (m, rad) nearest point within HEARTBEAT_HALF_WIDTH
         self._front_time = None
         self._x = None               # m, odom frame
         self._y = None               # m, odom frame
@@ -147,9 +157,10 @@ class ConeDriver(Node):
         self._command_lock = threading.Lock()
 
         self._cmd_pub = self.create_publisher(TwistStamped, 'cmd_vel', 10)
-        # While moving, keep the latest velocity setpoint flowing at a steady rate
-        # while the main thread processes camera images between control decisions.
-        self._command_timer = self.create_timer(CONTROL_PERIOD, self._repeat_command)
+        # While moving, this timer is the only regular sender of cmd_vel: it keeps the
+        # latest setpoint flowing at a steady rate, even while the main thread processes
+        # camera images between control decisions.
+        self._command_timer = self.create_timer(COMMAND_PERIOD, self._repeat_command)
         self.create_subscription(Image, 'oakd/rgb/preview/image_raw',
                                  self._image_callback, qos_profile_sensor_data)
         self.create_subscription(LaserScan, 'scan',
@@ -158,7 +169,7 @@ class ConeDriver(Node):
                                  self._odom_callback, qos_profile_sensor_data)
         self.create_subscription(HazardDetectionVector, 'hazard_detection',
                                  self._hazard_callback, qos_profile_sensor_data)
-        self._health_timer = self.create_timer(2.0, self._health_callback)
+        self._health_timer = self.create_timer(1.0, self._health_callback)
 
     def _declare(self, name, default, description, low=None, high=None):
         """Declare a read-only parameter, with a range if low and high are given."""
@@ -181,7 +192,8 @@ class ConeDriver(Node):
         self._image_time = self.get_clock().now()
 
     def _scan_callback(self, msg):
-        """Store the nearest LiDAR range straight ahead."""
+        """Store the nearest LiDAR range straight ahead, and the nearest point for the log."""
+        self._wide = nearest_ahead(msg, self._lidar_yaw, HEARTBEAT_HALF_WIDTH)
         self._front = front_range(msg, self._lidar_yaw, self._front_half_width)
         self._front_time = self.get_clock().now()
 
@@ -212,7 +224,7 @@ class ConeDriver(Node):
         return (self.get_clock().now() - stamp).nanoseconds / 1e9
 
     def _health_callback(self):
-        """Log sensor freshness and this node's cmd_vel publishing activity every 2 s."""
+        """Log sensor freshness and this node's cmd_vel publishing activity every second."""
         sensors = (
             ('image', self._image_time),
             ('scan', self._front_time),
@@ -232,46 +244,91 @@ class ConeDriver(Node):
 
         cmd_age = self._age(self._cmd_time)
         if cmd_age is None:
-            command = f'cmd_vel=never published ({self._cmd_count} msgs/2s)'
+            command = f'cmd_vel=never published ({self._cmd_count} msgs/s)'
         else:
             command = (f'cmd_vel={self._cmd_linear:+.2f} m/s, '
                        f'{self._cmd_angular:+.2f} rad/s, age={cmd_age:.2f}s '
-                       f'({self._cmd_count} msgs/2s)')
+                       f'({self._cmd_count} msgs/s)')
         self._cmd_count = 0
 
-        message = 'Health: ' + ', '.join(statuses) + '; ' + command
+        if self._front is None:
+            lidar = 'lidar=no scan yet'
+        else:
+            # front is what the stop decision uses; nearest shows what else is close
+            front = f'{self._front:.2f} m' if math.isfinite(self._front) else 'none'
+            wide_range, wide_angle = self._wide
+            if wide_angle is None:
+                nearest = 'none'
+            else:
+                nearest = f'{wide_range:.2f} m at {math.degrees(wide_angle):+.0f} deg'
+            lidar = (f'lidar front(+/-{math.degrees(self._front_half_width):.0f} deg)={front}, '
+                     f'nearest(+/-{math.degrees(HEARTBEAT_HALF_WIDTH):.0f} deg)={nearest}, '
+                     f'stop at {self._stop_range:.2f} m')
+
+        message = 'Health: ' + ', '.join(statuses) + '; ' + lidar + '; ' + command
         if stale:
             self.get_logger().warn(message + '; unavailable/stale: ' + ', '.join(stale))
         else:
             self.get_logger().info(message)
 
+    def _is_fresh(self, stamp):
+        """Return whether data that arrived at stamp (node clock) is recent enough."""
+        age = self._age(stamp)
+        return age is not None and age <= self._data_timeout
+
+    def _await_fresh(self, name, stamp_of):
+        """
+        Return once the data named name is fresh, holding the robot still while it is not.
+
+        stamp_of returns when that data last arrived. A short WiFi stall delays every topic
+        at once, so instead of aborting the task at once, stop and wait up to stale_wait for
+        the data to come back. Raise Abort if it does not.
+        """
+        if self._is_fresh(stamp_of()):
+            return
+        self.stop()
+        self.get_logger().warn(f'{name} is stale; holding still for up to '
+                               f'{self._stale_wait:.1f} s for it to come back')
+        deadline = self._now() + self._stale_wait
+        while self._now() < deadline:
+            time.sleep(CONTROL_PERIOD)
+            if self._is_fresh(stamp_of()):
+                self.get_logger().info(f'{name} is back; continuing')
+                return
+        raise Abort(f'{name} stopped arriving for over {self._stale_wait:.1f} s')
+
     def _fresh_yaw(self):
-        """Return the latest yaw; raise Abort if odometry stopped arriving."""
-        age = self._age(self._yaw_time)
-        if age is None or age > self._data_timeout:
-            raise Abort('odometry (odom) stopped arriving')
+        """Return the latest yaw, waiting out a short odometry stall (see _await_fresh)."""
+        self._await_fresh('odometry (odom)', lambda: self._yaw_time)
         return self._yaw
 
     def _fresh_front(self):
-        """Return the LiDAR's front range, or math.inf if scans stopped arriving."""
-        age = self._age(self._front_time)
-        if age is None or age > self._data_timeout:
-            return math.inf
+        """
+        Return the LiDAR's front range, waiting out a short scan stall (see _await_fresh).
+
+        The result is math.inf if no valid range is straight ahead in the latest scan.
+        """
+        self._await_fresh('LiDAR scans (scan)', lambda: self._front_time)
         return self._front
 
+    def _front_if_fresh(self):
+        """Return the LiDAR's front range without waiting, or math.inf if scans are stale."""
+        return self._front if self._is_fresh(self._front_time) else math.inf
+
     def _fresh_image(self):
-        """Return the latest camera image; raise Abort if it is missing or stale."""
-        age = self._age(self._image_time)
-        if age is None or age > self._data_timeout:
-            raise Abort('camera image stopped arriving')
+        """Return the latest camera image, waiting out a short image stall."""
+        self._await_fresh('camera images', lambda: self._image_time)
         return self._image
 
-    def _publish(self, linear, angular):
-        """Publish a velocity command (m/s forward, rad/s left), clamped to the limits."""
+    def _set_target(self, linear, angular):
+        """Set the velocity setpoint (m/s forward, rad/s left), clamped to the limits."""
         self._target_linear = max(-MAX_LINEAR_SPEED,
                                   min(MAX_LINEAR_SPEED, float(linear)))
         self._target_angular = max(-MAX_ANGULAR_SPEED,
                                    min(MAX_ANGULAR_SPEED, float(angular)))
+
+    def _publish(self):
+        """Publish the current velocity setpoint on cmd_vel."""
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'base_link'
@@ -287,31 +344,37 @@ class ConeDriver(Node):
         """Keep active motion alive; stay quiet while stopped or awaiting user input."""
         with self._command_lock:
             if self._motion_active:
-                self._publish(self._target_linear, self._target_angular)
+                self._publish()
 
     def _step(self, linear, angular):
         """
-        Send one velocity command and wait one control period.
+        Set the velocity setpoint and wait one control period.
 
-        On a recent bump or cliff, or when odometry stopped arriving, raise Abort instead;
-        the caller's finally stops the robot.
+        The command timer sends the setpoint; only the first command of a motion goes out
+        here at once, so the robot starts without waiting for the timer. On a recent bump
+        or cliff, or when odometry stays stale past stale_wait, raise Abort instead; the
+        caller's finally stops the robot.
         """
         age = self._age(self._hazard_time)
         if age is not None and age < HAZARD_HOLD:
             raise Abort(f'{self._hazard} detected')
         self._fresh_yaw()
         with self._command_lock:
+            starting = not self._motion_active
+            self._set_target(linear, angular)
             self._motion_active = True
-            self._publish(linear, angular)
+            if starting:
+                self._publish()
         time.sleep(CONTROL_PERIOD)
 
     def stop(self):
         """Stop the robot: send a zero velocity a few times, in case one is lost."""
         with self._command_lock:
             self._motion_active = False
-            self._publish(0.0, 0.0)
+            self._set_target(0.0, 0.0)
+            self._publish()
         for _ in range(2):
-            self._publish(0.0, 0.0)
+            self._publish()
             time.sleep(0.02)
 
     def _wait_for_data(self, timeout=30.0):
@@ -370,7 +433,8 @@ class ConeDriver(Node):
     def _look(self, image, yaw, sightings):
         """Update sightings with each color's blob in one camera image."""
         center = (image.shape[1] - 1) / 2.0
-        distance = self._fresh_front()
+        # Task 1 only logs this distance, so do not hold the turn still for it
+        distance = self._front_if_fresh()
         for color in self._colors:
             blob = find_blob(image, self._hsv[color], self._min_area)
             if blob is None:
@@ -608,7 +672,8 @@ def main(args=None):
     # (see "Sync vs async" in the ROS 2 docs)
     executor = SingleThreadedExecutor()
     executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
     try:
         node.run()
     except KeyboardInterrupt:
@@ -616,6 +681,10 @@ def main(args=None):
     finally:
         node.stop()
         executor.shutdown()
+        # Let spin() return before the node and ROS are torn down; tearing them down under
+        # a still-spinning thread aborts the process ("terminate called without an active
+        # exception")
+        spin_thread.join(timeout=2.0)
         node.destroy_node()
         rclpy.try_shutdown()
 

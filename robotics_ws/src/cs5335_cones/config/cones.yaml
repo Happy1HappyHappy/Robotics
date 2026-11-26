@@ -5,15 +5,15 @@
 cone_driver:
   ros__parameters:
     # Colors of the three cones, from: red, orange, yellow, green, blue, purple, pink
-    colors: ['orange', 'green', 'blue']
+    colors: ['purple', 'green', 'orange']
 
     # HSV range of each color: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi], OpenCV's scale
     # (H 0-179, S and V 0-255); h_lo > h_hi wraps through 0 (red)
     hsv:
       orange: [5, 120, 100, 18, 255, 255]
-      green: [40, 80, 50, 85, 255, 255]
-      blue: [95, 120, 50, 130, 255, 255]
-    min_area: 50              # px, a smaller blob is noise, not a cone
+      green: [45, 110, 60, 80, 255, 255]
+      purple: [131, 100, 50, 155, 255, 255]
+    min_area: 100             # px, a smaller blob is noise, not a cone
 
     turn_speed: 0.3           # rad/s, Task 1's turn
     # rad, how far the LiDAR is turned on the robot (counter-clockwise). Check with:
@@ -22,5 +22,10 @@ cone_driver:
 
     # Task 2: approach slowly and stop before the cone. Tune stop_range in the lab so
     # the robot's front edge ends about 1 inch from the cone.
-    stop_range: 0.20          # m, measured from the LiDAR
+    stop_range: 0.3          # m, measured from the LiDAR
     center_tolerance: 0.06    # fraction of image half-width
+
+    # A WiFi stall delays odom, scan and camera together. Data older than data_timeout
+    # makes the robot hold still; it continues if the data is back within stale_wait
+    data_timeout: 0.5         # s
+    stale_wait: 2.0           # s

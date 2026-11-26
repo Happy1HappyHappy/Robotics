@@ -17,8 +17,8 @@
 import math
 from types import SimpleNamespace
 
-from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, wrap_angle,
-                                  yaw_from_quaternion)
+from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, front_range, nearest_ahead,
+                                  wrap_angle, yaw_from_quaternion)
 import cv2
 import numpy as np
 import pytest
@@ -83,6 +83,20 @@ def test_front_range_skips_invalid_ranges():
     ranges = [2.0] * 360
     ranges[178:183] = [math.inf, math.nan, 0.05, 20.0, math.inf]
     assert front_range(make_scan(ranges), 0.0, math.radians(2.0)) == math.inf
+
+
+def test_nearest_ahead_reports_the_angle_to_the_left():
+    # with lidar_yaw = +pi/2, LiDAR index 102 is 12 degrees left of straight ahead
+    ranges = [2.0] * 360
+    ranges[102] = 0.4
+    distance, angle = nearest_ahead(make_scan(ranges), math.pi / 2.0, math.radians(30.0))
+    assert distance == 0.4
+    assert math.degrees(angle) == pytest.approx(12.0)
+
+
+def test_nearest_ahead_without_a_valid_range():
+    ranges = [math.inf] * 360
+    assert nearest_ahead(make_scan(ranges), 0.0, math.radians(30.0)) == (math.inf, None)
 
 
 def test_find_blob_center_column():

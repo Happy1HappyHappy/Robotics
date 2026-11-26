@@ -6,7 +6,7 @@
 cone_node:
   ros__parameters:
     # The three cones' colors, from: red, orange, yellow, green, blue, purple, pink
-    colors: ['orange', 'green', 'blue']
+    colors: ['purple', 'green', 'orange']
 
     # HSV range of each color: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi], OpenCV's scale
     # (H 0-179, S and V 0-255); h_lo > h_hi wraps through 0 (red). Click on a cone in the
