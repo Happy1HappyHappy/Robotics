@@ -92,6 +92,23 @@ def front_range(scan, lidar_yaw, half_width):
     return min(front_window(scan, lidar_yaw, half_width), default=math.inf)
 
 
+def nearest_ahead(scan, lidar_yaw, half_width):
+    """
+    Return (range m, angle rad) of the nearest valid LiDAR point within half_width of ahead.
+
+    The angle is in the robot's frame (0 = straight ahead, + = left). The arguments are as
+    for front_window. If no valid range is in that direction, the result is (math.inf, None).
+    """
+    nearest, nearest_angle = math.inf, None
+    for i, r in enumerate(scan.ranges):
+        if not scan.range_min <= r <= scan.range_max:
+            continue
+        angle = wrap_angle(scan.angle_min + i * scan.angle_increment + lidar_yaw)
+        if abs(angle) <= half_width and r < nearest:
+            nearest, nearest_angle = r, angle
+    return nearest, nearest_angle
+
+
 def is_narrow(window, depth):
     """
     Return whether the nearest return in window is a narrow object, such as a cone.
