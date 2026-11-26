@@ -5,14 +5,14 @@
 cone_driver:
   ros__parameters:
     # Colors of the three cones, from: red, orange, yellow, green, blue, purple, pink
-    colors: ['orange', 'green', 'blue']
+    colors: ['purple', 'orange', 'green']
 
     # HSV range of each color: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi], OpenCV's scale
     # (H 0-179, S and V 0-255); h_lo > h_hi wraps through 0 (red)
     hsv:
       orange: [5, 120, 100, 18, 255, 255]
       green: [40, 80, 50, 85, 255, 255]
-      blue: [95, 120, 50, 130, 255, 255]
+      purple: [131, 60, 50, 155, 255, 255]
     min_area: 50              # px, a smaller blob is noise, not a cone
 
     turn_speed: 0.3           # rad/s, Task 1's turn
