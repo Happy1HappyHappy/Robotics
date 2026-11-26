@@ -18,8 +18,8 @@ import math
 from types import SimpleNamespace
 
 from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, focal_from_fov, front_range,
-                                  front_window, is_narrow, pixel_bearing, wrap_angle,
-                                  yaw_from_quaternion)
+                                  front_window, is_narrow, nearest_ahead, pixel_bearing,
+                                  wrap_angle, yaw_from_quaternion)
 import cv2
 import numpy as np
 import pytest
@@ -168,3 +168,17 @@ def test_bearing_of_a_point_seen_by_a_pinhole_camera():
     x_right, z = 0.3, 1.2               # m, a cone right of and ahead of the camera
     u = cx + fx * x_right / z
     assert pixel_bearing(u, fx, cx) == pytest.approx(-math.atan2(x_right, z))
+
+
+def test_nearest_ahead_reports_the_angle_to_the_left():
+    # with lidar_yaw = +pi/2, LiDAR index 102 is 12 degrees left of straight ahead
+    ranges = [2.0] * 360
+    ranges[102] = 0.4
+    distance, angle = nearest_ahead(make_scan(ranges), math.pi / 2.0, math.radians(30.0))
+    assert distance == 0.4
+    assert math.degrees(angle) == pytest.approx(12.0)
+
+
+def test_nearest_ahead_without_a_valid_range():
+    ranges = [math.inf] * 360
+    assert nearest_ahead(make_scan(ranges), 0.0, math.radians(30.0)) == (math.inf, None)

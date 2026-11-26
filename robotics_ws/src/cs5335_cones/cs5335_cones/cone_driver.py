@@ -30,7 +30,8 @@ import threading
 import time
 
 from cs5335_cones.sensing import (DEFAULT_HSV, find_blob, focal_from_fov, front_window,
-                                  is_narrow, pixel_bearing, wrap_angle, yaw_from_quaternion)
+                                  is_narrow, nearest_ahead, pixel_bearing, wrap_angle,
+                                  yaw_from_quaternion)
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import TwistStamped
 from irobot_create_msgs.msg import HazardDetection, HazardDetectionVector
@@ -56,6 +57,9 @@ CONE_SCANS = 5                  # LiDAR scans the cone's range is measured from
 CONE_DEPTH = 0.15               # m, returns this close behind the nearest are the same object
 ALIGN_TRIES = 5                 # Task 2: turn-to-bearing corrections before giving up
 RETURN_PATH_SAMPLE = 0.10       # m, record an odometry point this often on the way out
+# rad, the heartbeat also logs the nearest LiDAR point this far either side of ahead, to
+# show a cone that is close but just outside the narrow front window
+HEARTBEAT_HALF_WIDTH = math.radians(30.0)
 
 # Hazards that stop the robot, with the name to log
 STOP_HAZARDS = {
@@ -138,6 +142,7 @@ class ConeDriver(Node):
         self._front = None          # m, nearest LiDAR range straight ahead (math.inf: none)
         self._front_object = None   # (that range, whether it is a narrow object like a cone)
         self._front_time = None
+        self._wide = (math.inf, None)   # (m, rad) nearest point within HEARTBEAT_HALF_WIDTH
         self._x = None               # m, odom frame
         self._y = None               # m, odom frame
         self._yaw = None            # rad, odom frame, counter-clockwise positive
@@ -207,6 +212,7 @@ class ConeDriver(Node):
         front = min(window, default=math.inf)
         # one assignment, so the main thread never reads a range with another scan's flag
         self._front_object = (front, is_narrow(window, CONE_DEPTH))
+        self._wide = nearest_ahead(msg, self._lidar_yaw, HEARTBEAT_HALF_WIDTH)
         self._front = front
         self._front_time = self.get_clock().now()
 
@@ -264,7 +270,25 @@ class ConeDriver(Node):
                        f'({self._cmd_count} msgs/2s)')
         self._cmd_count = 0
 
-        message = 'Health: ' + ', '.join(statuses) + '; ' + command
+        if self._front_object is None:
+            lidar = 'lidar=no scan yet'
+        else:
+            # front is what Task 2 measures the cone with (when cone-like); nearest shows
+            # what else is close
+            front, narrow = self._front_object
+            if math.isfinite(front):
+                front = f'{front:.2f} m' + (' (cone-like)' if narrow else '')
+            else:
+                front = 'none'
+            wide_range, wide_angle = self._wide
+            if wide_angle is None:
+                nearest = 'none'
+            else:
+                nearest = f'{wide_range:.2f} m at {math.degrees(wide_angle):+.0f} deg'
+            lidar = (f'lidar front(+/-{math.degrees(self._front_half_width):.0f} deg)={front}, '
+                     f'nearest(+/-{math.degrees(HEARTBEAT_HALF_WIDTH):.0f} deg)={nearest}')
+
+        message = 'Health: ' + ', '.join(statuses) + '; ' + lidar + '; ' + command
         if stale:
             self.get_logger().warn(message + '; unavailable/stale: ' + ', '.join(stale))
         else:
