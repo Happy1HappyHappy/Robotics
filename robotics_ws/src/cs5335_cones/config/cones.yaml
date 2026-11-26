@@ -5,12 +5,12 @@
 cone_driver:
   ros__parameters:
     # Colors of the three cones, from: red, orange, yellow, green, blue, purple, pink
-    colors: ['purple', 'orange', 'green']
+    colors: ['yellow', 'green', 'purple']
 
     # HSV range of each color: [h_lo, s_lo, v_lo, h_hi, s_hi, v_hi], OpenCV's scale
     # (H 0-179, S and V 0-255); h_lo > h_hi wraps through 0 (red)
     hsv:
-      orange: [5, 120, 100, 18, 255, 255]
+      yellow: [20, 100, 100, 35, 255, 255]
       green: [40, 80, 50, 85, 255, 255]
       purple: [131, 60, 50, 155, 255, 255]
     min_area: 50              # px, a smaller blob is noise, not a cone
